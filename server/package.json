@@ -1,0 +1,18 @@
+{
+  "name": "loyadham-live-server",
+  "version": "1.0.0",
+  "description": "Signaling server for Loyadham Live streaming",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
