@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: loyadham-live-server
+    env: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    plan: free
+    healthCheckPath: /health

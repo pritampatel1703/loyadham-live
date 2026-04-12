@@ -6,6 +6,9 @@ const cors = require('cors');
 const app = express();
 app.use(cors({ origin: '*' }));
 
+// Health check — required for Render to confirm the server is running
+app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -133,6 +136,15 @@ io.on('connection', (socket) => {
 
 // ─── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`\n🕉️  Loyadham Live Server running → http://localhost:${PORT}\n`);
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🕉️  Loyadham Live Server running on port ${PORT}\n`);
+});
+
+// Catch unhandled errors so the process doesn't silently die on Render
+process.on('uncaughtException', (err) => {
+  console.error('[ERROR] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[ERROR] Unhandled rejection:', reason);
 });
