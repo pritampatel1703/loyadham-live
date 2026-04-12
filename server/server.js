@@ -42,7 +42,7 @@ io.on('connection', (socket) => {
   socket.on('admin-go-live', ({ title }) => {
     stream = {
       active: true,
-      title: title || 'Loyadham_ Live',
+      title: title || 'Loyadham Live',
       adminSocketId: socket.id,
       startedAt: new Date().toISOString(),
     };
