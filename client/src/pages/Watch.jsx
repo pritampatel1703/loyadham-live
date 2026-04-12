@@ -33,6 +33,8 @@ export default function Watch() {
     pc.ontrack = (e) => {
       if (videoRef.current && e.streams[0]) {
         videoRef.current.srcObject = e.streams[0];
+        // Explicitly call play() — required on iOS Safari and some Android browsers
+        videoRef.current.play().catch(err => console.warn('[Video] Autoplay blocked:', err));
       }
       setConnStatus('connected');
     };
@@ -204,35 +206,38 @@ export default function Watch() {
         {/* Video area */}
         <div className="video-section">
           <div className="video-wrapper">
-            {connStatus === 'connected' && (
-              <video
-                ref={videoRef}
-                id="stream-video"
-                autoPlay
-                playsInline
-                className="stream-video"
-              />
-            )}
+            {/* Always render video so videoRef is available when ontrack fires.
+                Hiding via CSS instead of conditional rendering fixes the black video bug. */}
+            <video
+              ref={videoRef}
+              id="stream-video"
+              autoPlay
+              playsInline
+              className="stream-video"
+              style={{ display: connStatus === 'connected' ? 'block' : 'none' }}
+            />
 
-            {connStatus === 'connected' ? null : connStatus === 'offline' ? (
-              <div className="video-placeholder">
-                <div className="placeholder-icon">📿</div>
-                <h3>Stream has ended</h3>
-                <p>Thank you for watching. May you be blessed. 🙏</p>
-                <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={() => navigate('/')}>
-                  ← Go Home
-                </button>
-              </div>
-            ) : (
-              <div className="video-placeholder">
-                <div className="placeholder-icon placeholder-spin">🕉️</div>
-                <h3>{streamState.active ? 'Connecting to stream…' : 'Waiting for stream to start'}</h3>
-                <p>
-                  {streamState.active
-                    ? 'Setting up your live connection, please wait…'
-                    : 'You will be connected automatically when Loyadham goes live.'}
-                </p>
-              </div>
+            {connStatus !== 'connected' && (
+              connStatus === 'offline' ? (
+                <div className="video-placeholder">
+                  <div className="placeholder-icon">📿</div>
+                  <h3>Stream has ended</h3>
+                  <p>Thank you for watching. May you be blessed. 🙏</p>
+                  <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={() => navigate('/')}>
+                    ← Go Home
+                  </button>
+                </div>
+              ) : (
+                <div className="video-placeholder">
+                  <div className="placeholder-icon placeholder-spin">🕉️</div>
+                  <h3>{streamState.active ? 'Connecting to stream…' : 'Waiting for stream to start'}</h3>
+                  <p>
+                    {streamState.active
+                      ? 'Setting up your live connection, please wait…'
+                      : 'You will be connected automatically when Loyadham goes live.'}
+                  </p>
+                </div>
+              )
             )}
           </div>
 
