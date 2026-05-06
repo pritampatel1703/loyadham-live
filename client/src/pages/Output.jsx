@@ -13,7 +13,7 @@ export default function Output() {
   const forceHighBitrateSDP = (sdp) => {
     const lines = sdp.split('\r\n');
     const idx = lines.findIndex(l => l.startsWith('m=video'));
-    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:12000');
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:6000');
     return lines.join('\r\n');
   };
 

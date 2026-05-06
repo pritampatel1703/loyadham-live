@@ -146,7 +146,7 @@ export default function Camera() {
   const forceHighBitrateSDP = (sdp) => {
     const lines = sdp.split('\r\n');
     const idx = lines.findIndex(l => l.startsWith('m=video'));
-    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:12000');
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:6000');
     return lines.join('\r\n');
   };
 
@@ -161,7 +161,7 @@ export default function Camera() {
           try {
             const params = sender.getParameters();
             if (!params.encodings) params.encodings = [{}];
-            params.encodings[0].maxBitrate = 12000000;
+            params.encodings[0].maxBitrate = 6000000;
             params.encodings[0].networkPriority = 'high';
             sender.setParameters(params).catch(()=>{});
           } catch (e) { /* ignore if browser doesn't support */ }

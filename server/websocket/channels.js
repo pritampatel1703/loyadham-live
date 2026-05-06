@@ -74,7 +74,7 @@ function setupWebSocketChannels(io) {
   signalingNs.on('connection', (socket) => {
     socket.on('offer', ({ targetId, sdp, streamId }) => signalingNs.to(targetId).emit('offer', { fromId: socket.id, sdp, streamId }));
     socket.on('answer', ({ targetId, sdp }) => signalingNs.to(targetId).emit('answer', { fromId: socket.id, sdp }));
-    socket.on('ice-candidate', ({ targetId, candidate }) => signalingNs.to(targetId).emit('ice-candidate', { fromId: socket.id, candidate }));
+    socket.on('ice-candidate', ({ targetId, candidate, streamId }) => signalingNs.to(targetId).emit('ice-candidate', { fromId: socket.id, candidate, streamId }));
     socket.on('join-room', ({ roomId }) => { socket.join(roomId); socket.to(roomId).emit('peer-joined', { peerId: socket.id }); });
     socket.on('leave-room', ({ roomId }) => { socket.leave(roomId); socket.to(roomId).emit('peer-left', { peerId: socket.id }); });
   });
