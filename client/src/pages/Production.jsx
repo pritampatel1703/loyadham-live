@@ -33,7 +33,6 @@ export default function Production() {
   const iceQueues = useRef({});
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
-  const pendingRooms = useRef([]); // rooms to join once socket connects
   const [updateTrigger, setUpdateTrigger] = useState(0);
 
   const load = async () => {
@@ -63,16 +62,13 @@ export default function Production() {
   // ── WebRTC: Connect to each online device's camera stream ──
   const connectToCamera = useCallback((deviceId) => {
     const existing = peerConns.current[deviceId];
-    if (existing && typeof existing === 'object') return;
+    if (existing) return; // already connected or pending
 
     peerConns.current[deviceId] = 'pending';
     console.log('[Production] connectToCamera:', deviceId, 'connected:', signalingSocket.connected);
 
-    const roomId = `camera-${deviceId}`;
     if (signalingSocket.connected) {
-      signalingSocket.emit('join-room', { roomId });
-    } else {
-      pendingRooms.current.push(roomId);
+      signalingSocket.emit('join-room', { roomId: `camera-${deviceId}` });
     }
   }, []);
 
@@ -158,9 +154,6 @@ export default function Production() {
 
     const onConnect = () => {
       console.log('[Production] Socket connected:', signalingSocket.id);
-      const rooms = [...pendingRooms.current];
-      pendingRooms.current = [];
-      rooms.forEach(roomId => signalingSocket.emit('join-room', { roomId }));
       Object.entries(peerConns.current).forEach(([devId, val]) => {
         if (val === 'pending') signalingSocket.emit('join-room', { roomId: `camera-${devId}` });
       });
