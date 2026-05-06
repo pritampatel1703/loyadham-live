@@ -28,6 +28,11 @@ export default function Camera() {
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [orientation, setOrientation] = useState('landscape');
   const [stabilization, setStabilization] = useState('auto');
+  
+  // Fullscreen & Zoom
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -109,6 +114,15 @@ export default function Camera() {
       streamRef.current = stream;
       trackRef.current = stream.getVideoTracks()[0];
       if (videoRef.current) videoRef.current.srcObject = stream;
+
+      // Check zoom capabilities
+      const caps = trackRef.current.getCapabilities();
+      if (caps.zoom) {
+        setZoomRange({ min: caps.zoom.min || 1, max: caps.zoom.max || 5, step: caps.zoom.step || 0.1 });
+        setZoom(caps.zoom.min || 1);
+      } else {
+        setZoomRange({ min: 1, max: 1, step: 0.1 });
+      }
 
       // Replace tracks on all existing peer connections
       peersRef.current.forEach((pc) => {
@@ -227,6 +241,30 @@ export default function Camera() {
     if (!streamRef.current) return;
     streamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
     setIsMuted(m => !m);
+  };
+
+  // ── Zoom Handler ──
+  const handleZoom = async (e) => {
+    const val = parseFloat(e.target.value);
+    setZoom(val);
+    if (trackRef.current) {
+      try {
+        await trackRef.current.applyConstraints({ advanced: [{ zoom: val }] });
+      } catch (err) { console.warn('Zoom failed:', err); }
+    }
+  };
+
+  // ── Fullscreen Toggle ──
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch (e) { console.warn('Fullscreen failed:', e); }
   };
 
   // ── Battery & Network info ──
@@ -378,7 +416,13 @@ export default function Camera() {
         </div>
         {deviceName && <span style={styles.deviceLabel}>{deviceName}</span>}
         {streaming && <span style={{ ...styles.statusBadge, background: 'rgba(239,68,68,.6)', border: '1px solid rgba(239,68,68,.4)' }}>🔴 STREAMING · {viewers} viewer{viewers !== 1 ? 's' : ''}</span>}
-        {status === 'live' && <span style={styles.timer}>{fmtTime(elapsed)}</span>}
+        
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
+          {status === 'live' && <span style={styles.timer}>{fmtTime(elapsed)}</span>}
+          <button style={styles.fsBtn} onClick={toggleFullscreen}>
+            {isFullscreen ? '↙️' : '↗️'}
+          </button>
+        </div>
       </div>
 
       {/* Stats Bar */}
@@ -392,8 +436,27 @@ export default function Camera() {
       )}
 
       {/* Bottom Controls */}
-      <div style={styles.controls}>
-        <button style={styles.controlBtn} onClick={toggleMute}>
+      <div style={styles.controlsArea}>
+        
+        {/* Zoom Slider */}
+        {zoomRange.max > 1 && status === 'live' && (
+          <div style={styles.zoomContainer}>
+            <span style={styles.zoomLabel}>1x</span>
+            <input 
+              type="range" 
+              min={zoomRange.min} 
+              max={zoomRange.max} 
+              step={zoomRange.step} 
+              value={zoom} 
+              onChange={handleZoom} 
+              style={styles.zoomSlider} 
+            />
+            <span style={styles.zoomLabel}>{Math.round(zoomRange.max)}x</span>
+          </div>
+        )}
+
+        <div style={styles.controls}>
+          <button style={styles.controlBtn} onClick={toggleMute}>
           <span style={{ fontSize: '1.5rem' }}>{isMuted ? '🔇' : '🎙️'}</span>
           <span style={styles.controlLabel}>{isMuted ? 'Unmute' : 'Mute'}</span>
         </button>
@@ -412,6 +475,7 @@ export default function Camera() {
           <span style={{ fontSize: '1.5rem' }}>⚙️</span>
           <span style={styles.controlLabel}>Settings</span>
         </button>
+      </div>
       </div>
 
       {/* Settings Overlay */}
@@ -499,11 +563,19 @@ const styles = {
   topHud: { position: 'absolute', top: 0, left: 0, right: 0, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, background: 'linear-gradient(180deg, rgba(0,0,0,.7), transparent)', zIndex: 10, flexWrap: 'wrap' },
   statusBadge: { display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,.6)', padding: '4px 12px', borderRadius: 20, fontSize: '.75rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'system-ui, sans-serif', border: '1px solid rgba(255,255,255,.1)' },
   deviceLabel: { color: '#f8fafc', fontSize: '.85rem', fontWeight: 600, fontFamily: 'system-ui, sans-serif' },
-  timer: { marginLeft: 'auto', color: '#ef4444', fontSize: '.85rem', fontWeight: 700, fontFamily: 'Consolas, monospace', background: 'rgba(0,0,0,.6)', padding: '4px 12px', borderRadius: 20, border: '1px solid rgba(239,68,68,.3)' },
+  timer: { color: '#ef4444', fontSize: '.85rem', fontWeight: 700, fontFamily: 'Consolas, monospace', background: 'rgba(0,0,0,.6)', padding: '4px 12px', borderRadius: 20, border: '1px solid rgba(239,68,68,.3)' },
+  fsBtn: { background: 'rgba(0,0,0,.6)', border: '1px solid rgba(255,255,255,.2)', color: '#fff', borderRadius: 8, padding: '4px 8px', cursor: 'pointer', fontSize: '1rem' },
   statsBar: { position: 'absolute', top: 52, left: 0, right: 0, padding: '4px 16px', display: 'flex', gap: 16, fontSize: '.7rem', color: '#94a3b8', fontFamily: 'system-ui, sans-serif', zIndex: 10 },
-  controls: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', display: 'flex', justifyContent: 'space-around', alignItems: 'center', background: 'linear-gradient(0deg, rgba(0,0,0,.8), transparent)', zIndex: 10 },
+  
+  controlsArea: { position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', flexDirection: 'column', background: 'linear-gradient(0deg, rgba(0,0,0,.8), transparent)', zIndex: 10, paddingBottom: 16 },
+  zoomContainer: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 32px', width: '100%', boxSizing: 'border-box' },
+  zoomLabel: { color: '#fff', fontSize: '.75rem', fontWeight: 600, fontFamily: 'system-ui, sans-serif', textShadow: '0 1px 2px #000' },
+  zoomSlider: { flex: 1, accentColor: '#3b82f6', height: 4 },
+  
+  controls: { display: 'flex', justifyContent: 'space-around', alignItems: 'center', width: '100%', padding: '0 16px', boxSizing: 'border-box', marginTop: 8 },
   controlBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 16, padding: '12px 20px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', backdropFilter: 'blur(8px)' },
   controlLabel: { fontSize: '.65rem', color: '#cbd5e1', fontWeight: 600, fontFamily: 'system-ui, sans-serif' },
+
   errorPage: { position: 'fixed', inset: 0, background: '#0f172a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, fontFamily: 'system-ui, sans-serif' },
   errorIcon: { fontSize: '4rem', marginBottom: 16 },
   errorTitle: { color: '#f8fafc', fontSize: '1.5rem', margin: '0 0 8px', textAlign: 'center' },
