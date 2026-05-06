@@ -290,14 +290,20 @@ export default function Camera() {
   // ── Fullscreen Toggle ──
   const toggleFullscreen = async () => {
     try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
+      const doc = document.documentElement;
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (doc.requestFullscreen) await doc.requestFullscreen();
+        else if (doc.webkitRequestFullscreen) await doc.webkitRequestFullscreen();
         setIsFullscreen(true);
       } else {
-        await document.exitFullscreen();
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
         setIsFullscreen(false);
       }
-    } catch (e) { console.warn('Fullscreen failed:', e); }
+    } catch (e) { 
+      console.warn('Fullscreen failed:', e);
+      alert('Your browser does not support hiding the address bar (often true for iPhones). The app is already optimized to fill the screen!');
+    }
   };
 
   // ── Battery & Network info & Mobile setup ──
