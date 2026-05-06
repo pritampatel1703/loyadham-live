@@ -27,6 +27,7 @@ export default function Camera() {
   const [cameras, setCameras] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [orientation, setOrientation] = useState('landscape');
+  const [stabilization, setStabilization] = useState('auto');
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -88,6 +89,12 @@ export default function Camera() {
         height: { ideal: r.height },
         frameRate: { ideal: frameRate }
       };
+
+      // Add stabilization if supported/requested
+      // Note: Not all browsers support this constraint yet, but passing it is safe
+      if (stabilization !== 'off') {
+        videoConstraints.videoStabilizationMode = { ideal: stabilization };
+      }
 
       if (selectedCameraId) {
         videoConstraints.deviceId = { exact: selectedCameraId };
@@ -201,7 +208,7 @@ export default function Camera() {
     if (status === 'live') {
       startCamera();
     }
-  }, [resolution, frameRate, selectedCameraId, facingMode]);
+  }, [resolution, frameRate, selectedCameraId, facingMode, stabilization]);
 
   // ── Toggle torch ──
   const toggleTorch = async () => {
@@ -447,6 +454,17 @@ export default function Camera() {
                   <div key={fps} style={styles.settingRow} onClick={() => setFrameRate(fps)}>
                     <span>{fps} fps</span>
                     {frameRate === fps && <span style={styles.checkIcon}>✓</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Stabilization */}
+              <div style={styles.settingGroup}>
+                <div style={styles.settingLabel}>Stabilization</div>
+                {['off', 'auto', 'standard', 'cinematic'].map(mode => (
+                  <div key={mode} style={styles.settingRow} onClick={() => setStabilization(mode)}>
+                    <span>{mode.charAt(0).toUpperCase() + mode.slice(1)}</span>
+                    {stabilization === mode && <span style={styles.checkIcon}>✓</span>}
                   </div>
                 ))}
               </div>
