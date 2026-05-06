@@ -61,68 +61,58 @@ export default function Production() {
 
   // ── WebRTC: Connect to each online device's camera stream ──
   const connectToCamera = useCallback((deviceId) => {
-    if (peerConns.current[deviceId]) return; // already connected
-    
+    if (peerConns.current[deviceId]) return; // already connected or pending
+
+    // Mark as pending so we don't double-join
+    peerConns.current[deviceId] = 'pending';
+
+    // Join the camera's signaling room — the camera will send us an offer
+    signalingSocket.emit('join-room', { roomId: `camera-${deviceId}` });
+  }, []);
+
+  // Handle incoming offer from camera
+  const handleCameraOffer = useCallback(async ({ fromId, sdp, streamId }) => {
+    // Close any stale/pending connection for this device
+    const existing = peerConns.current[streamId];
+    if (existing && existing !== 'pending' && typeof existing === 'object') {
+      try { existing.close(); } catch(e) {}
+    }
+
+    // Create a fresh peer connection with the camera's REAL socket ID
     const pc = new RTCPeerConnection(ICE_SERVERS);
-    peerConns.current[deviceId] = pc;
+    peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
-      remoteStreams.current[deviceId] = e.streams[0];
-      const videoEl = videoRefs.current[deviceId];
+      remoteStreams.current[streamId] = e.streams[0];
+      const videoEl = videoRefs.current[streamId];
       if (videoEl) {
         videoEl.srcObject = e.streams[0];
         videoEl.play().catch(() => {});
       }
+      setUpdateTrigger(t => t + 1);
     };
 
+    // CRITICAL: Send ICE candidates to the camera's ACTUAL socket ID, not a room name
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        signalingSocket.emit('ice-candidate', { targetId: `camera-${deviceId}`, candidate: e.candidate });
+        signalingSocket.emit('ice-candidate', { targetId: fromId, candidate: e.candidate, streamId });
       }
     };
 
     pc.onconnectionstatechange = () => {
       if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
         pc.close();
-        delete peerConns.current[deviceId];
-        delete remoteStreams.current[deviceId];
+        delete peerConns.current[streamId];
+        delete remoteStreams.current[streamId];
       }
     };
-
-    // Join the camera's signaling room
-    signalingSocket.emit('join-room', { roomId: `camera-${deviceId}` });
-  }, []);
-
-  // Handle incoming offer from camera
-  const handleCameraOffer = useCallback(async ({ fromId, sdp, streamId }) => {
-    // streamId is the device_id
-    let pc = peerConns.current[streamId];
-    if (!pc) {
-      pc = new RTCPeerConnection(ICE_SERVERS);
-      peerConns.current[streamId] = pc;
-      
-      pc.ontrack = (e) => {
-        remoteStreams.current[streamId] = e.streams[0];
-        const videoEl = videoRefs.current[streamId];
-        if (videoEl) {
-          videoEl.srcObject = e.streams[0];
-          videoEl.play().catch(() => {});
-        }
-        setUpdateTrigger(t => t + 1);
-      };
-
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          signalingSocket.emit('ice-candidate', { targetId: fromId, candidate: e.candidate });
-        }
-      };
-    }
 
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
 
+    // Drain any queued ICE candidates
     if (iceQueues.current[streamId]) {
       iceQueues.current[streamId].forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
       delete iceQueues.current[streamId];
