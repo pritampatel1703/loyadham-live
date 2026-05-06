@@ -28,6 +28,13 @@ export default function Devices() {
   const delDevice = async (id) => { if (confirm('Delete device?')) { await devicesApi.delete(id); load(); } };
   const showQR = async (id) => { const d = await devicesApi.qr(id); setQrData(d); };
 
+  const copyVmixLink = (id) => {
+    const url = `${window.location.origin}/output/${id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      alert('vMix Link Copied! Paste this URL into a vMix Web Browser Input.');
+    }).catch(() => alert('Failed to copy.'));
+  };
+
   const filtered = devices.filter(d => !filter || d.name.toLowerCase().includes(filter.toLowerCase()) || d.group_name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
@@ -65,6 +72,7 @@ export default function Devices() {
               {d.tags?.length > 0 && <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>{d.tags.map(t => <span key={t} className="badge badge-info" style={{fontSize:'.65rem'}}>{t}</span>)}</div>}
               <div style={{ marginTop: 12, display: 'flex', gap: 6 }}>
                 <button className="btn btn-sm" onClick={() => showQR(d.id)}>📱 QR Pair</button>
+                <button className="btn btn-sm" onClick={() => copyVmixLink(d.id)}>🔗 Copy vMix Link</button>
                 <button className="btn btn-sm btn-danger" onClick={() => delDevice(d.id)}>🗑️</button>
               </div>
             </div>
