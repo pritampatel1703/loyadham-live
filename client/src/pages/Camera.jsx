@@ -300,8 +300,11 @@ export default function Camera() {
     } catch (e) { console.warn('Fullscreen failed:', e); }
   };
 
-  // ── Battery & Network info ──
+  // ── Battery & Network info & Mobile setup ──
   useEffect(() => {
+    // Block mobile pull-to-refresh
+    document.body.style.overscrollBehaviorY = 'none';
+
     if ('getBattery' in navigator) {
       navigator.getBattery().then(b => {
         setBattery(Math.round(b.level * 100));
@@ -314,6 +317,8 @@ export default function Camera() {
       update();
       conn.addEventListener('change', update);
     }
+
+    return () => { document.body.style.overscrollBehaviorY = 'auto'; };
   }, []);
 
   // ── Connect to server ──
@@ -453,9 +458,6 @@ export default function Camera() {
         
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
           {status === 'live' && <span style={styles.timer}>{fmtTime(elapsed)}</span>}
-          <button style={styles.fsBtn} onClick={toggleFullscreen}>
-            {isFullscreen ? '↙️' : '↗️'}
-          </button>
         </div>
       </div>
 
@@ -490,20 +492,25 @@ export default function Camera() {
         )}
 
         <div style={styles.controls}>
-          <button style={styles.controlBtn} onClick={toggleMute}>
-          <span style={{ fontSize: '1.5rem' }}>{isMuted ? '🔇' : '🎙️'}</span>
-          <span style={styles.controlLabel}>{isMuted ? 'Unmute' : 'Mute'}</span>
-        </button>
+          <button style={styles.controlBtn} onClick={toggleFullscreen}>
+            <span style={{ fontSize: '1.5rem' }}>{isFullscreen ? '↙️' : '⛶'}</span>
+            <span style={styles.controlLabel}>{isFullscreen ? 'Exit FS' : 'Fullscreen'}</span>
+          </button>
 
-        <button style={styles.controlBtn} onClick={toggleTorch}>
-          <span style={{ fontSize: '1.5rem' }}>{isTorch ? '🔦' : '💡'}</span>
-          <span style={styles.controlLabel}>{isTorch ? 'Torch Off' : 'Torch'}</span>
-        </button>
+          <button style={{ ...styles.controlBtn, background: isMuted ? 'rgba(239,68,68,.2)' : 'rgba(255,255,255,.1)', borderColor: isMuted ? 'rgba(239,68,68,.5)' : 'rgba(255,255,255,.15)' }} onClick={toggleMute}>
+            <span style={{ fontSize: '1.5rem' }}>{isMuted ? '🔇' : '🎙️'}</span>
+            <span style={styles.controlLabel}>{isMuted ? 'Unmute' : 'Mute'}</span>
+          </button>
 
-        <button style={styles.controlBtn} onClick={flipCamera}>
-          <span style={{ fontSize: '1.5rem' }}>🔄</span>
-          <span style={styles.controlLabel}>Flip</span>
-        </button>
+          <button style={styles.controlBtn} onClick={toggleTorch}>
+            <span style={{ fontSize: '1.5rem' }}>{isTorch ? '🔦' : '💡'}</span>
+            <span style={styles.controlLabel}>{isTorch ? 'Torch Off' : 'Torch'}</span>
+          </button>
+
+          <button style={styles.controlBtn} onClick={flipCamera}>
+            <span style={{ fontSize: '1.5rem' }}>🔄</span>
+            <span style={styles.controlLabel}>Flip</span>
+          </button>
 
         <button style={styles.controlBtn} onClick={() => setShowSettings(true)}>
           <span style={{ fontSize: '1.5rem' }}>⚙️</span>

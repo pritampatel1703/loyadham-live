@@ -28,8 +28,9 @@ export default function Production() {
   const recTimerRef = useRef(null);
   const containerRef = useRef(null);
   const videoRefs = useRef({});  // deviceId -> video element
-  const pgmVideoRef = useRef(null);
   const pvwVideoRef = useRef(null);
+  const pgmVideoRef = useRef(null);
+  const pgmContainerRef = useRef(null);
   const iceQueues = useRef({});
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
@@ -253,8 +254,8 @@ export default function Production() {
   };
 
   const fullscreenPgm = async () => {
-    if (!pgmVideoRef.current) return;
-    if (document.fullscreenElement === pgmVideoRef.current) {
+    if (!pgmContainerRef.current) return;
+    if (document.fullscreenElement === pgmContainerRef.current) {
       document.exitFullscreen().catch(()=>{});
       return;
     }
@@ -264,15 +265,14 @@ export default function Production() {
         const screenDetails = await window.getScreenDetails();
         const externalScreen = screenDetails.screens.find(s => s !== screenDetails.currentScreen);
         if (externalScreen) {
-          await pgmVideoRef.current.requestFullscreen({ screen: externalScreen }).catch(()=>{});
+          await pgmContainerRef.current.requestFullscreen({ screen: externalScreen }).catch(()=>{});
           return;
         }
       }
+      await pgmContainerRef.current.requestFullscreen().catch(()=>{});
     } catch (e) {
-      console.warn('Screen Details API not supported or denied. Using standard fullscreen.');
+      console.warn('Fullscreen API error:', e);
     }
-    
-    pgmVideoRef.current.requestFullscreen().catch(()=>{});
   };
 
   const openPgmDisplay = () => {
@@ -421,7 +421,8 @@ export default function Production() {
               ⛶
             </button>
           </div>
-          <div className="vmix-monitor-video">
+          <div className="vmix-monitor-video" ref={pgmContainerRef} style={{ position: 'relative' }}>
+            <style dangerouslySetInnerHTML={{__html: `video::-webkit-media-controls { display: none !important; }`}} />
             <video 
               ref={pgmVideoRef}
               autoPlay 
