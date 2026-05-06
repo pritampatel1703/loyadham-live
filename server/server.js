@@ -20,6 +20,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', platform: 'Pixel Perfect', version: '2.0.0' }));
+app.get('/ping', (_req, res) => res.send('pong'));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: ALLOWED_ORIGINS === '*' ? '*' : ALLOWED_ORIGINS, methods: ['GET', 'POST'] } });

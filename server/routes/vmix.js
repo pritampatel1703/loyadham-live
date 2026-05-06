@@ -6,38 +6,38 @@ const VmixService = require('../services/vmix-service');
 const router = express.Router();
 const vmixInstances = new Map();
 
-function getVmix(id) {
+async function getVmix(id) {
   if (vmixInstances.has(id)) return vmixInstances.get(id);
-  const c = helpers.getVmixById(id);
+  const c = await helpers.getVmixById(id);
   if (!c) return null;
   const inst = new VmixService(c.host, c.port);
   vmixInstances.set(id, inst);
   return inst;
 }
 
-router.get('/connections', authenticate, (req, res) => res.json({ connections: helpers.getAllVmixConnections() }));
-router.post('/connections', authenticate, requireRole('production_admin'), (req, res) => { const { name, host, port } = req.body; const id = uuidv4(); helpers.createVmixConnection(id, name||'vMix', host||'127.0.0.1', port||8088); res.status(201).json({ id }); });
-router.put('/connections/:id', authenticate, requireRole('production_admin'), (req, res) => { const { name, host, port, auto_reconnect } = req.body; helpers.updateVmixConnection(name, host, port, auto_reconnect?1:0, req.params.id); vmixInstances.delete(req.params.id); res.json({ success: true }); });
-router.delete('/connections/:id', authenticate, requireRole('super_admin'), (req, res) => { helpers.deleteVmixConnection(req.params.id); vmixInstances.delete(req.params.id); res.json({ success: true }); });
+router.get('/connections', authenticate, async (req, res) => res.json({ connections: await helpers.getAllVmixConnections() }));
+router.post('/connections', authenticate, requireRole('production_admin'), async (req, res) => { const { name, host, port } = req.body; const id = uuidv4(); await helpers.createVmixConnection(id, name||'vMix', host||'127.0.0.1', port||8088); res.status(201).json({ id }); });
+router.put('/connections/:id', authenticate, requireRole('production_admin'), async (req, res) => { const { name, host, port, auto_reconnect } = req.body; await helpers.updateVmixConnection(name, host, port, auto_reconnect?1:0, req.params.id); vmixInstances.delete(req.params.id); res.json({ success: true }); });
+router.delete('/connections/:id', authenticate, requireRole('super_admin'), async (req, res) => { await helpers.deleteVmixConnection(req.params.id); vmixInstances.delete(req.params.id); res.json({ success: true }); });
 
 router.post('/:id/test', authenticate, requireRole('operator'), async (req, res) => {
-  const v = getVmix(req.params.id);
+  const v = await getVmix(req.params.id);
   if (!v) return res.status(404).json({ error: 'Not found' });
   const r = await v.testConnection();
-  helpers.updateVmixStatus(r.connected?1:0, req.params.id);
-  if (!r.connected) helpers.updateVmixError(r.error||'', req.params.id);
-  helpers.addLog(null, 'vmix', req.user.username, r.connected ? 'vMix connected' : `vMix failed: ${r.error}`, '{}');
+  await helpers.updateVmixStatus(r.connected?1:0, req.params.id);
+  if (!r.connected) await helpers.updateVmixError(r.error||'', req.params.id);
+  await helpers.addLog(null, 'vmix', req.user.username, r.connected ? 'vMix connected' : `vMix failed: ${r.error}`, '{}');
   res.json(r);
 });
 
 router.get('/:id/status', authenticate, async (req, res) => {
-  const v = getVmix(req.params.id);
+  const v = await getVmix(req.params.id);
   if (!v) return res.status(404).json({ error: 'Not found' });
   res.json(await v.getStatus());
 });
 
 router.post('/:id/action', authenticate, requireRole('operator'), async (req, res) => {
-  const v = getVmix(req.params.id);
+  const v = await getVmix(req.params.id);
   if (!v) return res.status(404).json({ error: 'Not found' });
   const { action, params } = req.body;
   const actions = {
@@ -54,7 +54,7 @@ router.post('/:id/action', authenticate, requireRole('operator'), async (req, re
   };
   if (!actions[action]) return res.status(400).json({ error: `Unknown action: ${action}` });
   const result = await actions[action]();
-  helpers.addLog(null, 'vmix', req.user.username, `vMix: ${action}`, JSON.stringify(params||{}));
+  await helpers.addLog(null, 'vmix', req.user.username, `vMix: ${action}`, JSON.stringify(params||{}));
   res.json(result);
 });
 

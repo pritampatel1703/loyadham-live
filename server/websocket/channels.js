@@ -8,47 +8,66 @@ function setupWebSocketChannels(io) {
   deviceNs.on('connection', (socket) => {
     console.log(`[WS/device] ${socket.id} connected`);
 
-    socket.on('device:register', ({ device_id, pairing_token }) => {
-      const device = pairing_token ? helpers.getDeviceByPairingToken(pairing_token) : helpers.getDeviceById(device_id);
-      if (!device) return socket.emit('device:error', { message: 'Invalid device' });
-      connectedDevices.set(socket.id, device.id);
-      deviceSockets.set(device.id, socket.id);
-      helpers.updateDeviceStatus(1, -1, -1, -1, '', 0, 0, '', '', device.id);
-      helpers.addLog(null, 'device', device.name, `"${device.name}" connected`, JSON.stringify({ device_id: device.id }));
-      socket.emit('device:registered', { device_id: device.id, device_name: device.name });
-      io.of('/production').emit('device:online', { device_id: device.id, device_name: device.name });
+    socket.on('device:register', async ({ device_id, pairing_token }) => {
+      try {
+        const device = pairing_token ? await helpers.getDeviceByPairingToken(pairing_token) : await helpers.getDeviceById(device_id);
+        if (!device) return socket.emit('device:error', { message: 'Invalid device' });
+        connectedDevices.set(socket.id, device.id);
+        deviceSockets.set(device.id, socket.id);
+        await helpers.updateDeviceStatus(1, -1, -1, -1, '', 0, 0, '', '', device.id);
+        await helpers.addLog(null, 'device', device.name, `"${device.name}" connected`, JSON.stringify({ device_id: device.id }));
+        socket.emit('device:registered', { device_id: device.id, device_name: device.name });
+        io.of('/production').emit('device:online', { device_id: device.id, device_name: device.name });
+      } catch (err) {
+        console.error('[WS/device:register] Error', err);
+      }
     });
 
-    socket.on('device:heartbeat', (data) => {
-      const did = connectedDevices.get(socket.id);
-      if (!did) return;
-      const { battery, signal, temperature, resolution, fps, bitrate, network_type, ip_address } = data;
-      helpers.updateDeviceStatus(1, battery??-1, signal??-1, temperature??-1, resolution||'', fps||0, bitrate||0, network_type||'', ip_address||'', did);
-      helpers.addSnapshot(did, null, bitrate||0, fps||0, 0, 0, battery??-1, signal??-1, resolution||'');
-      io.of('/production').emit('device:heartbeat', { device_id: did, ...data });
+    socket.on('device:heartbeat', async (data) => {
+      try {
+        const did = connectedDevices.get(socket.id);
+        if (!did) return;
+        const { battery, signal, temperature, resolution, fps, bitrate, network_type, ip_address } = data;
+        await helpers.updateDeviceStatus(1, battery??-1, signal??-1, temperature??-1, resolution||'', fps||0, bitrate||0, network_type||'', ip_address||'', did);
+        await helpers.addSnapshot(did, null, bitrate||0, fps||0, 0, 0, battery??-1, signal??-1, resolution||'');
+        io.of('/production').emit('device:heartbeat', { device_id: did, ...data });
+      } catch (err) {
+        console.error('[WS/device:heartbeat] Error', err);
+      }
     });
 
-    socket.on('disconnect', () => {
-      const did = connectedDevices.get(socket.id);
-      if (did) {
-        helpers.setDeviceOffline(did);
-        connectedDevices.delete(socket.id);
-        deviceSockets.delete(did);
-        helpers.addLog(null, 'device', 'system', 'Device disconnected', JSON.stringify({ device_id: did }));
-        io.of('/production').emit('device:offline', { device_id: did });
+    socket.on('disconnect', async () => {
+      try {
+        const did = connectedDevices.get(socket.id);
+        if (did) {
+          await helpers.setDeviceOffline(did);
+          connectedDevices.delete(socket.id);
+          deviceSockets.delete(did);
+          await helpers.addLog(null, 'device', 'system', 'Device disconnected', JSON.stringify({ device_id: did }));
+          io.of('/production').emit('device:offline', { device_id: did });
+        }
+      } catch (err) {
+        console.error('[WS/device:disconnect] Error', err);
       }
     });
   });
 
   const productionNs = io.of('/production');
-  productionNs.on('connection', (socket) => {
-    socket.emit('devices:state', { devices: helpers.getAllDevices() });
-    socket.emit('streams:state', { streams: helpers.getActiveStreams() });
-    const ae = helpers.getActiveEvent();
-    if (ae) socket.emit('event:active', { event: ae });
-    socket.on('log:subscribe', ({ event_id, limit }) => {
-      socket.emit('logs:history', { logs: event_id ? helpers.getLogsByEvent(event_id, limit||50) : helpers.getRecentLogs(limit||50) });
-    });
+  productionNs.on('connection', async (socket) => {
+    try {
+      socket.emit('devices:state', { devices: await helpers.getAllDevices() });
+      socket.emit('streams:state', { streams: await helpers.getActiveStreams() });
+      const ae = await helpers.getActiveEvent();
+      if (ae) socket.emit('event:active', { event: ae });
+      
+      socket.on('log:subscribe', async ({ event_id, limit }) => {
+        try {
+          socket.emit('logs:history', { logs: event_id ? await helpers.getLogsByEvent(event_id, limit||50) : await helpers.getRecentLogs(limit||50) });
+        } catch (err) { console.error('[WS/log:subscribe] Error', err); }
+      });
+    } catch (err) {
+      console.error('[WS/production:connection] Error', err);
+    }
   });
 
   const signalingNs = io.of('/signaling');

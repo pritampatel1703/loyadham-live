@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
--- ANTIGRAVITY — Broadcast Production Platform Database Schema
+-- PIXEL PERFECT — Broadcast Production Platform Database Schema (PostgreSQL)
 -- ═══════════════════════════════════════════════════════════════
 
 -- Users & Roles
@@ -10,9 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('super_admin','production_admin','operator','camera_operator','viewer')),
   avatar TEXT DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_login TEXT
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login TIMESTAMP WITH TIME ZONE
 );
 
 -- Devices (Android camera units)
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS devices (
   group_name TEXT DEFAULT 'Default',
   pairing_token TEXT UNIQUE,
   is_online INTEGER NOT NULL DEFAULT 0,
-  last_active TEXT,
+  last_active TIMESTAMP WITH TIME ZONE,
   battery_percent INTEGER DEFAULT -1,
   signal_quality INTEGER DEFAULT -1,
   temperature REAL DEFAULT -1,
@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS devices (
   latitude REAL DEFAULT 0,
   longitude REAL DEFAULT 0,
   tally_state TEXT DEFAULT 'off' CHECK(tally_state IN ('off','preview','program')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Device Tags
 CREATE TABLE IF NOT EXISTS device_tags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   tag TEXT NOT NULL,
   UNIQUE(device_id, tag)
@@ -65,9 +65,9 @@ CREATE TABLE IF NOT EXISTS streams (
   latency_ms INTEGER DEFAULT 0,
   packet_loss REAL DEFAULT 0,
   uptime_seconds INTEGER DEFAULT 0,
-  started_at TEXT,
-  ended_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  started_at TIMESTAMP WITH TIME ZONE,
+  ended_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Events (Production Events)
@@ -76,21 +76,21 @@ CREATE TABLE IF NOT EXISTS events (
   title TEXT NOT NULL,
   description TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','live','completed','cancelled')),
-  scheduled_start TEXT,
-  scheduled_end TEXT,
-  actual_start TEXT,
-  actual_end TEXT,
+  scheduled_start TIMESTAMP WITH TIME ZONE,
+  scheduled_end TIMESTAMP WITH TIME ZONE,
+  actual_start TIMESTAMP WITH TIME ZONE,
+  actual_end TIMESTAMP WITH TIME ZONE,
   scene_preset TEXT DEFAULT '{}',
   layout_config TEXT DEFAULT '{}',
   production_template TEXT DEFAULT '',
   created_by TEXT REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Camera Assignments (Event ↔ Device)
 CREATE TABLE IF NOT EXISTS camera_assignments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'camera' CHECK(role IN ('camera','ptz','wide','close','roaming','backup')),
@@ -107,25 +107,25 @@ CREATE TABLE IF NOT EXISTS vmix_connections (
   port INTEGER NOT NULL DEFAULT 8088,
   is_connected INTEGER NOT NULL DEFAULT 0,
   auto_reconnect INTEGER NOT NULL DEFAULT 1,
-  last_connected TEXT,
+  last_connected TIMESTAMP WITH TIME ZONE,
   last_error TEXT DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Production Logs
 CREATE TABLE IF NOT EXISTS production_logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
   type TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info','warning','error','vmix','device','stream','production')),
   source TEXT DEFAULT 'system',
   message TEXT NOT NULL,
   metadata TEXT DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Analytics Snapshots
 CREATE TABLE IF NOT EXISTS analytics_snapshots (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
   stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
   bitrate INTEGER DEFAULT 0,
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
   battery_percent INTEGER DEFAULT -1,
   signal_quality INTEGER DEFAULT -1,
   resolution TEXT DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Settings (key-value)
@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT '',
   category TEXT DEFAULT 'general',
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Layouts (saved production layouts)
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS layouts (
   description TEXT DEFAULT '',
   config TEXT NOT NULL DEFAULT '{}',
   created_by TEXT REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ═══ Indexes ═══
@@ -166,11 +166,8 @@ CREATE INDEX IF NOT EXISTS idx_production_logs_created ON production_logs(create
 CREATE INDEX IF NOT EXISTS idx_analytics_device ON analytics_snapshots(device_id);
 CREATE INDEX IF NOT EXISTS idx_analytics_created ON analytics_snapshots(created_at);
 
--- ═══ Seed default admin ═══
--- Password: Pixel Perfect@2026 (bcrypt hash inserted by database.js init)
-
 -- ═══ Default settings ═══
-INSERT OR IGNORE INTO settings (key, value, category) VALUES
+INSERT INTO settings (key, value, category) VALUES
   ('platform_name', 'Pixel Perfect', 'general'),
   ('org_name', 'Loyadham', 'general'),
   ('default_stream_protocol', 'webrtc', 'streaming'),
@@ -184,4 +181,5 @@ INSERT OR IGNORE INTO settings (key, value, category) VALUES
   ('mediamtx_port', '8554', 'streaming'),
   ('srt_ready', '0', 'streaming'),
   ('ndi_ready', '0', 'streaming'),
-  ('bonding_ready', '0', 'network');
+  ('bonding_ready', '0', 'network')
+ON CONFLICT (key) DO NOTHING;
