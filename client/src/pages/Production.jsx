@@ -35,6 +35,13 @@ export default function Production() {
   const remoteStreams = useRef({}); // deviceId -> MediaStream
   const [updateTrigger, setUpdateTrigger] = useState(0);
 
+  const forceHighBitrateSDP = (sdp) => {
+    const lines = sdp.split('\r\n');
+    const idx = lines.findIndex(l => l.startsWith('m=video'));
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:12000');
+    return lines.join('\r\n');
+  };
+
   const load = async () => {
     try {
       const [d, l, v] = await Promise.all([devicesApi.list(), analyticsApi.logs('', 30), vmixApi.connections()]);
@@ -120,6 +127,7 @@ export default function Production() {
 
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();
+    answer.sdp = forceHighBitrateSDP(answer.sdp);
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
 

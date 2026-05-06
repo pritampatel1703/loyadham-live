@@ -10,6 +10,13 @@ export default function Output() {
   const iceQueue = useRef([]);
   const [status, setStatus] = useState('Waiting for camera...');
 
+  const forceHighBitrateSDP = (sdp) => {
+    const lines = sdp.split('\r\n');
+    const idx = lines.findIndex(l => l.startsWith('m=video'));
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:12000');
+    return lines.join('\r\n');
+  };
+
   const connectCamera = useCallback(() => {
     if (pcRef.current) return;
     setStatus('Connecting to camera...');
@@ -62,6 +69,7 @@ export default function Output() {
 
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();
+    answer.sdp = forceHighBitrateSDP(answer.sdp);
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
 

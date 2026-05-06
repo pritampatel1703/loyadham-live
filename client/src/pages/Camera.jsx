@@ -142,13 +142,31 @@ export default function Camera() {
   };
 
   // ── WebRTC: create offer and send to a production viewer ──
+  // Force 12 Mbps bitrate for absolute maximum video quality
+  const forceHighBitrateSDP = (sdp) => {
+    const lines = sdp.split('\r\n');
+    const idx = lines.findIndex(l => l.startsWith('m=video'));
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:12000');
+    return lines.join('\r\n');
+  };
+
   const createPeerConnection = useCallback((peerId) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peersRef.current.set(peerId, pc);
-
-    // Add local camera tracks
+    
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => pc.addTrack(track, streamRef.current));
+      streamRef.current.getTracks().forEach(track => {
+        const sender = pc.addTrack(track, streamRef.current);
+        if (track.kind === 'video') {
+          try {
+            const params = sender.getParameters();
+            if (!params.encodings) params.encodings = [{}];
+            params.encodings[0].maxBitrate = 12000000;
+            params.encodings[0].networkPriority = 'high';
+            sender.setParameters(params).catch(()=>{});
+          } catch (e) { /* ignore if browser doesn't support */ }
+        }
+      });
     }
 
     pc.onicecandidate = (e) => {
@@ -177,6 +195,7 @@ export default function Camera() {
     console.log('[Camera] Production viewer joined:', peerId);
     const pc = createPeerConnection(peerId);
     const offer = await pc.createOffer();
+    offer.sdp = forceHighBitrateSDP(offer.sdp);
     await pc.setLocalDescription(offer);
     sigSocketRef.current.emit('offer', {
       targetId: peerId,
