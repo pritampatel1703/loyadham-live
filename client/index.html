@@ -6,9 +6,17 @@
   <meta name="description" content="Pixel Perfect — Professional Broadcast Production Platform for Loyadham temple broadcasting, live events, and multi-camera workflows." />
   <title>Pixel Perfect — Broadcast Production Platform</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="manifest" href="/manifest.json" />
 </head>
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>
