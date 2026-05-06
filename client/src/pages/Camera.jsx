@@ -20,6 +20,14 @@ export default function Camera() {
   const [elapsed, setElapsed] = useState(0);
   const [viewers, setViewers] = useState(0);
   const [streaming, setStreaming] = useState(false);
+  
+  // Settings States
+  const [showSettings, setShowSettings] = useState(false);
+  const [frameRate, setFrameRate] = useState(30);
+  const [cameras, setCameras] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
+  const [orientation, setOrientation] = useState('landscape');
+
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const deviceSocketRef = useRef(null);
@@ -33,15 +41,62 @@ export default function Camera() {
     '480p': { width: 854, height: 480 },
     '720p': { width: 1280, height: 720 },
     '1080p': { width: 1920, height: 1080 },
+    '2160p': { width: 3840, height: 2160 },
+  };
+
+  // Enumerate cameras
+  useEffect(() => {
+    const getCams = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevs = devices.filter(d => d.kind === 'videoinput');
+        setCameras(videoDevs);
+        if (videoDevs.length > 0 && !selectedCameraId) {
+          const back = videoDevs.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment'));
+          setSelectedCameraId(back ? back.deviceId : videoDevs[0].deviceId);
+        }
+      } catch (e) { console.error('Enumerate error', e); }
+    };
+    getCams();
+    navigator.mediaDevices.addEventListener('devicechange', getCams);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', getCams);
+  }, []);
+
+  // Handle Orientation
+  const handleOrientation = async (val) => {
+    setOrientation(val);
+    try {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+         await document.documentElement.requestFullscreen();
+      }
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock(val);
+      }
+    } catch (e) {
+      console.warn('Orientation lock failed:', e);
+    }
   };
 
   // ── Start camera ──
-  const startCamera = async (facing) => {
+  const startCamera = async () => {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     try {
       const r = resMap[resolution] || resMap['1080p'];
+      
+      const videoConstraints = {
+        width: { ideal: r.width },
+        height: { ideal: r.height },
+        frameRate: { ideal: frameRate }
+      };
+
+      if (selectedCameraId) {
+        videoConstraints.deviceId = { exact: selectedCameraId };
+      } else {
+        videoConstraints.facingMode = facingMode;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: r.width }, height: { ideal: r.height }, frameRate: { ideal: 30 } },
+        video: videoConstraints,
         audio: true,
       });
       streamRef.current = stream;
@@ -138,8 +193,15 @@ export default function Camera() {
   const flipCamera = async () => {
     const next = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(next);
-    await startCamera(next);
+    setSelectedCameraId(''); // clear specific lens when flipping to front
   };
+
+  // Restart camera when settings change
+  useEffect(() => {
+    if (status === 'live') {
+      startCamera();
+    }
+  }, [resolution, frameRate, selectedCameraId, facingMode]);
 
   // ── Toggle torch ──
   const toggleTorch = async () => {
@@ -200,7 +262,7 @@ export default function Camera() {
       timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
 
       // Start camera
-      await startCamera(facingMode);
+      await startCamera();
 
       // Join signaling room with device ID so production can find us
       sigSock.emit('join-room', { roomId: `camera-${device_id}` });
@@ -339,16 +401,76 @@ export default function Camera() {
           <span style={styles.controlLabel}>Flip</span>
         </button>
 
-        <button style={styles.controlBtn} onClick={() => {
-          const opts = ['480p', '720p', '1080p'];
-          const next = opts[(opts.indexOf(resolution) + 1) % opts.length];
-          setResolution(next);
-          startCamera(facingMode);
-        }}>
-          <span style={{ fontSize: '1.5rem' }}>📐</span>
-          <span style={styles.controlLabel}>{resolution}</span>
+        <button style={styles.controlBtn} onClick={() => setShowSettings(true)}>
+          <span style={{ fontSize: '1.5rem' }}>⚙️</span>
+          <span style={styles.controlLabel}>Settings</span>
         </button>
       </div>
+
+      {/* Settings Overlay */}
+      {showSettings && (
+        <div style={styles.settingsOverlay} onClick={() => setShowSettings(false)}>
+          <div style={styles.settingsModal} onClick={e => e.stopPropagation()}>
+            <div style={styles.settingsHeader}>
+              <button style={styles.backBtn} onClick={() => setShowSettings(false)}>❮</button>
+              <h3 style={styles.settingsTitle}>Camera Settings</h3>
+              <div style={{width: 32}}></div>
+            </div>
+
+            <div style={styles.settingsBody}>
+              {/* Orientation */}
+              <div style={styles.settingGroup}>
+                <div style={styles.settingLabel}>Orientation</div>
+                {['landscape', 'portrait'].map(o => (
+                  <div key={o} style={styles.settingRow} onClick={() => handleOrientation(o)}>
+                    <span>{o.charAt(0).toUpperCase() + o.slice(1)}</span>
+                    {orientation === o && <span style={styles.checkIcon}>✓</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Resolution */}
+              <div style={styles.settingGroup}>
+                <div style={styles.settingLabel}>Resolution</div>
+                {['2160p', '1080p', '720p', '480p'].map(r => (
+                  <div key={r} style={styles.settingRow} onClick={() => setResolution(r)}>
+                    <span>{resMap[r].width}x{resMap[r].height} ({r})</span>
+                    {resolution === r && <span style={styles.checkIcon}>✓</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Frame Rate */}
+              <div style={styles.settingGroup}>
+                <div style={styles.settingLabel}>Frame rate</div>
+                {[15, 24, 25, 30, 50, 60].map(fps => (
+                  <div key={fps} style={styles.settingRow} onClick={() => setFrameRate(fps)}>
+                    <span>{fps} fps</span>
+                    {frameRate === fps && <span style={styles.checkIcon}>✓</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Camera Lens */}
+              {cameras.length > 0 && (
+                <div style={styles.settingGroup}>
+                  <div style={styles.settingLabel}>Camera lens</div>
+                  {cameras.map((cam, idx) => (
+                    <div key={cam.deviceId} style={styles.settingRow} onClick={() => setSelectedCameraId(cam.deviceId)}>
+                      <span>{cam.label || `Camera ${idx + 1}`}</span>
+                      {selectedCameraId === cam.deviceId && <span style={styles.checkIcon}>✓</span>}
+                    </div>
+                  ))}
+                  <div style={styles.settingRow} onClick={() => setSelectedCameraId('')}>
+                    <span>Auto (Default)</span>
+                    {!selectedCameraId && <span style={styles.checkIcon}>✓</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -368,4 +490,16 @@ const styles = {
   errorIcon: { fontSize: '4rem', marginBottom: 16 },
   errorTitle: { color: '#f8fafc', fontSize: '1.5rem', margin: '0 0 8px', textAlign: 'center' },
   errorText: { color: '#94a3b8', fontSize: '.9rem', textAlign: 'center', maxWidth: 320, lineHeight: 1.5 },
+  
+  // Settings UI
+  settingsOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 50, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' },
+  settingsModal: { background: '#111', width: '100%', maxHeight: '85vh', borderTopLeftRadius: 20, borderTopRightRadius: 20, display: 'flex', flexDirection: 'column', color: '#fff', fontFamily: 'system-ui, sans-serif' },
+  settingsHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #222' },
+  backBtn: { background: '#222', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '1.2rem' },
+  settingsTitle: { margin: 0, fontSize: '1.1rem', fontWeight: 600 },
+  settingsBody: { padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24 },
+  settingGroup: { display: 'flex', flexDirection: 'column', gap: 8 },
+  settingLabel: { fontSize: '.8rem', color: '#888', textTransform: 'uppercase', letterSpacing: 1, paddingLeft: 8, fontWeight: 600 },
+  settingRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#1c1c1e', borderRadius: 12, cursor: 'pointer', fontSize: '1rem' },
+  checkIcon: { color: '#3b82f6', fontWeight: 'bold', fontSize: '1.2rem' }
 };
