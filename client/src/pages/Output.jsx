@@ -7,6 +7,7 @@ export default function Output() {
   const { id } = useParams();
   const videoRef = useRef(null);
   const pcRef = useRef(null);
+  const iceQueue = useRef([]);
   const [status, setStatus] = useState('Waiting for camera...');
 
   const connectCamera = useCallback(() => {
@@ -63,6 +64,11 @@ export default function Output() {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
+
+    if (iceQueue.current.length > 0) {
+      iceQueue.current.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=> {}));
+      iceQueue.current = [];
+    }
   }, [id, connectCamera]);
 
   useEffect(() => {
@@ -72,6 +78,8 @@ export default function Output() {
     signalingSocket.on('ice-candidate', async ({ fromId, candidate }) => {
       if (pcRef.current && pcRef.current.remoteDescription) {
         try { await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { /* ignore */ }
+      } else {
+        iceQueue.current.push(candidate);
       }
     });
 

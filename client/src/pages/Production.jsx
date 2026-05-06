@@ -30,6 +30,7 @@ export default function Production() {
   const videoRefs = useRef({});  // deviceId -> video element
   const pgmVideoRef = useRef(null);
   const pvwVideoRef = useRef(null);
+  const iceQueues = useRef({});
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
   const [updateTrigger, setUpdateTrigger] = useState(0);
@@ -121,6 +122,11 @@ export default function Production() {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
+
+    if (iceQueues.current[streamId]) {
+      iceQueues.current[streamId].forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
+      delete iceQueues.current[streamId];
+    }
   }, []);
 
   // Setup signaling socket for receiving camera feeds
@@ -128,11 +134,23 @@ export default function Production() {
     signalingSocket.connect();
 
     signalingSocket.on('offer', handleCameraOffer);
-    signalingSocket.on('ice-candidate', async ({ fromId, candidate }) => {
-      // Find which PC this candidate belongs to
-      for (const [devId, pc] of Object.entries(peerConns.current)) {
-        if (pc.remoteDescription) {
-          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { /* ignore */ }
+    signalingSocket.on('ice-candidate', async ({ fromId, candidate, streamId }) => {
+      if (streamId) {
+        const pc = peerConns.current[streamId];
+        if (pc && pc.remoteDescription) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+        } else {
+          if (!iceQueues.current[streamId]) iceQueues.current[streamId] = [];
+          iceQueues.current[streamId].push(candidate);
+        }
+      } else {
+        for (const [devId, pc] of Object.entries(peerConns.current)) {
+          if (pc.remoteDescription) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+          } else {
+            if (!iceQueues.current[devId]) iceQueues.current[devId] = [];
+            iceQueues.current[devId].push(candidate);
+          }
         }
       }
     });

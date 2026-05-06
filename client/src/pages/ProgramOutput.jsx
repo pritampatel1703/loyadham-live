@@ -12,6 +12,7 @@ export default function ProgramOutput() {
 
   const peerConns = useRef({});
   const videoRefs = useRef({});
+  const iceQueues = useRef({});
 
   // 1. Fetch initial state
   const loadDevices = useCallback(async () => {
@@ -80,6 +81,11 @@ export default function ProgramOutput() {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
+
+    if (iceQueues.current[streamId]) {
+      iceQueues.current[streamId].forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
+      delete iceQueues.current[streamId];
+    }
   }, [connectToCamera]);
 
   useEffect(() => {
@@ -92,10 +98,23 @@ export default function ProgramOutput() {
     // WebRTC Signaling
     signalingSocket.connect();
     signalingSocket.on('offer', handleOffer);
-    signalingSocket.on('ice-candidate', async ({ fromId, candidate }) => {
-      for (const [devId, pc] of Object.entries(peerConns.current)) {
-        if (pc.remoteDescription) {
-          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { /* ignore */ }
+    signalingSocket.on('ice-candidate', async ({ fromId, candidate, streamId }) => {
+      if (streamId) {
+        const pc = peerConns.current[streamId];
+        if (pc && pc.remoteDescription) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+        } else {
+          if (!iceQueues.current[streamId]) iceQueues.current[streamId] = [];
+          iceQueues.current[streamId].push(candidate);
+        }
+      } else {
+        for (const [devId, pc] of Object.entries(peerConns.current)) {
+          if (pc.remoteDescription) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+          } else {
+            if (!iceQueues.current[devId]) iceQueues.current[devId] = [];
+            iceQueues.current[devId].push(candidate);
+          }
         }
       }
     });

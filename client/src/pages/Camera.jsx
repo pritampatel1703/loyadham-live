@@ -156,6 +156,7 @@ export default function Camera() {
         sigSocketRef.current.emit('ice-candidate', {
           targetId: peerId,
           candidate: e.candidate,
+          streamId: deviceId,
         });
       }
     };
