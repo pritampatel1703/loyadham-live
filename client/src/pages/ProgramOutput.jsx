@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { signalingSocket, productionSocket } from '../socket';
 import { ICE_SERVERS } from '../webrtc';
 import { devicesApi } from '../api/client';
 
 export default function ProgramOutput() {
+  const [searchParams] = useSearchParams();
   const [pgmId, setPgmId] = useState(null);
   const [devices, setDevices] = useState([]);
   const [status, setStatus] = useState('Waiting for Program feed...');
@@ -81,6 +83,12 @@ export default function ProgramOutput() {
   }, [connectToCamera]);
 
   useEffect(() => {
+    // Inject token if provided in URL (so API calls work in vMix)
+    const urlToken = searchParams.get('token');
+    if (urlToken) {
+      localStorage.setItem('ag_token', urlToken);
+    }
+
     // WebRTC Signaling
     signalingSocket.connect();
     signalingSocket.on('offer', handleOffer);

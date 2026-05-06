@@ -205,7 +205,8 @@ export default function Production() {
   };
 
   const copyPgmLink = () => {
-    const url = `${window.location.origin}/output/pgm`;
+    const token = localStorage.getItem('ag_token');
+    const url = `${window.location.origin}/output/pgm?token=${token}`;
     navigator.clipboard.writeText(url).then(() => {
       alert('vMix PGM Link Copied! Paste this URL into a vMix Web Browser Input.');
     }).catch(() => alert('Failed to copy.'));
