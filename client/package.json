@@ -1,15 +1,17 @@
 {
-  "name": "loyadham-live-client",
-  "version": "1.0.0",
+  "name": "antigravity-client",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Loyadham Live Streaming Client",
+  "description": "Pixel Perfect Broadcast Production Platform — Dashboard",
   "scripts": {
     "dev": "vite",
-    "build": "node ./node_modules/vite/bin/vite.js build",
-    "preview": "node ./node_modules/vite/bin/vite.js preview"
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
+    "chart.js": "^4.4.7",
     "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.0",
     "socket.io-client": "^4.7.4"

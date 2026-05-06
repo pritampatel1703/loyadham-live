@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Pixel Perfect Camera",
+    "slug": "pixel-perfect-camera",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0e1a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.loyadham.pixelperfect"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0e1a"
+      },
+      "package": "com.loyadham.pixelperfect",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.WAKE_LOCK"
+      ]
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "Allow Pixel Perfect to access your camera for live streaming." }],
+      ["expo-barcode-scanner", { "cameraPermission": "Allow Pixel Perfect to access camera to scan QR codes." }]
+    ]
+  }
+}

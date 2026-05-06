@@ -2,149 +2,57 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
-app.use(cors({ origin: '*' }));
 
-// Health check — required for Render to confirm the server is running
-app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+// CORS — allow all origins in dev, specific origins in prod
+const ALLOWED_ORIGINS = process.env.CLIENT_URL
+  ? [process.env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000']
+  : '*';
+app.use(cors({ origin: ALLOWED_ORIGINS }));
+app.use(express.json({ limit: '10mb' }));
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
-});
-
-// ─── Single Stream State ────────────────────────────────────────────────────
-let stream = {
-  active: false,
-  title: '',
-  adminSocketId: null,
-  startedAt: null,
-};
-
-// viewers: Map<socketId, { username }>
-const viewers = new Map();
-
-function viewerCount() {
-  return viewers.size;
+// Serve static client build in production
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = path.join(__dirname, '..', 'client', 'dist');
+  app.use(express.static(clientDist));
 }
 
-// ─── Socket.io ──────────────────────────────────────────────────────────────
-io.on('connection', (socket) => {
-  console.log(`[+] ${socket.id} connected`);
+app.get('/health', (_req, res) => res.json({ status: 'ok', platform: 'Pixel Perfect', version: '2.0.0' }));
 
-  // Send current stream state immediately on connect
-  socket.emit('stream-state', {
-    active: stream.active,
-    title: stream.title,
-    viewerCount: viewerCount(),
-    startedAt: stream.startedAt,
-  });
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: ALLOWED_ORIGINS === '*' ? '*' : ALLOWED_ORIGINS, methods: ['GET', 'POST'] } });
 
-  // ── ADMIN: Go Live ─────────────────────────────────────────────────────────
-  socket.on('admin-go-live', ({ title }) => {
-    stream = {
-      active: true,
-      title: title || 'Loyadham Live',
-      adminSocketId: socket.id,
-      startedAt: new Date().toISOString(),
-    };
-    console.log(`[LIVE] "${stream.title}"`);
-
-    // Notify all viewers the stream started
-    socket.broadcast.emit('stream-started', {
-      title: stream.title,
-      startedAt: stream.startedAt,
-    });
-    io.emit('viewer-count', viewerCount());
-
-    // Create offers for any viewers already waiting in the room
-    viewers.forEach((_, viewerId) => {
-      socket.emit('new-viewer', { viewerId });
-    });
-  });
-
-  // ── ADMIN: End Stream ──────────────────────────────────────────────────────
-  socket.on('admin-end-stream', () => {
-    stream = { active: false, title: '', adminSocketId: null, startedAt: null };
-    viewers.clear();
-    console.log('[OFFLINE] Stream ended by admin');
-    io.emit('stream-ended');
-    io.emit('viewer-count', 0);
-  });
-
-  // ── VIEWER: Join ───────────────────────────────────────────────────────────
-  socket.on('viewer-join', ({ username }) => {
-    const name = (username || 'Guest').slice(0, 40);
-    viewers.set(socket.id, { username: name });
-    console.log(`[VIEWER+] ${name} — total: ${viewerCount()}`);
-    io.emit('viewer-count', viewerCount());
-
-    // Tell the admin to create an offer for this viewer
-    if (stream.adminSocketId) {
-      io.to(stream.adminSocketId).emit('new-viewer', { viewerId: socket.id });
-    }
-  });
-
-  // ── WebRTC Signaling ───────────────────────────────────────────────────────
-  socket.on('offer', ({ targetId, sdp }) => {
-    io.to(targetId).emit('offer', { fromId: socket.id, sdp });
-  });
-
-  socket.on('answer', ({ targetId, sdp }) => {
-    io.to(targetId).emit('answer', { fromId: socket.id, sdp });
-  });
-
-  socket.on('ice-candidate', ({ targetId, candidate }) => {
-    io.to(targetId).emit('ice-candidate', { fromId: socket.id, candidate });
-  });
-
-  // ── Chat ───────────────────────────────────────────────────────────────────
-  socket.on('chat-message', ({ username, message, isAdmin }) => {
-    const safe = String(message).slice(0, 500);
-    io.emit('chat-message', {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      username: String(username).slice(0, 40),
-      message: safe,
-      isAdmin: !!isAdmin,
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  // ── Disconnect ─────────────────────────────────────────────────────────────
-  socket.on('disconnect', () => {
-    console.log(`[-] ${socket.id} disconnected`);
-
-    if (socket.id === stream.adminSocketId) {
-      // Admin left — end the stream
-      stream = { active: false, title: '', adminSocketId: null, startedAt: null };
-      viewers.clear();
-      io.emit('stream-ended');
-      io.emit('viewer-count', 0);
-      console.log('[OFFLINE] Admin disconnected — stream ended');
-    } else if (viewers.has(socket.id)) {
-      const v = viewers.get(socket.id);
-      viewers.delete(socket.id);
-      io.emit('viewer-count', viewerCount());
-      if (stream.adminSocketId) {
-        io.to(stream.adminSocketId).emit('viewer-left', { viewerId: socket.id });
-      }
-      console.log(`[VIEWER-] ${v.username} — total: ${viewerCount()}`);
-    }
-  });
-});
-
-// ─── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🕉️  Loyadham Live Server running on port ${PORT}\n`);
-});
+const { initDatabase } = require('./db/database');
 
-// Catch unhandled errors so the process doesn't silently die on Render
-process.on('uncaughtException', (err) => {
-  console.error('[ERROR] Uncaught exception:', err);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('[ERROR] Unhandled rejection:', reason);
-}); 
+(async () => {
+  await initDatabase();
+
+  app.use('/api/auth', require('./routes/auth'));
+  app.use('/api/devices', require('./routes/devices'));
+  app.use('/api/streams', require('./routes/streams'));
+  app.use('/api/events', require('./routes/events'));
+  app.use('/api/vmix', require('./routes/vmix'));
+  app.use('/api/analytics', require('./routes/analytics'));
+
+  const { setupWebSocketChannels } = require('./websocket/channels');
+  setupWebSocketChannels(io);
+
+  // SPA fallback — serve index.html for client-side routing in production
+  if (process.env.NODE_ENV === 'production') {
+    const clientDist = path.join(__dirname, '..', 'client', 'dist');
+    app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+  }
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n⚡ Pixel Perfect Broadcast Platform — Server running on port ${PORT}`);
+    console.log(`   Dashboard: http://localhost:5173`);
+    console.log(`   API:       http://localhost:${PORT}/api\n`);
+  });
+})();
+
+process.on('uncaughtException', (err) => console.error('[ERROR] Uncaught:', err));
+process.on('unhandledRejection', (reason) => console.error('[ERROR] Unhandled:', reason));

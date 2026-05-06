@@ -1,10 +1,5 @@
 import { io } from 'socket.io-client';
-
-const SOCKET_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
-
-export const socket = io(SOCKET_URL, {
-  autoConnect: false,
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000,
-});
+const URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
+export const productionSocket = io(`${URL}/production`, { autoConnect: false, transports: ['websocket','polling'] });
+export const deviceSocket = io(`${URL}/devices`, { autoConnect: false, transports: ['websocket','polling'] });
+export const signalingSocket = io(`${URL}/signaling`, { autoConnect: false, transports: ['websocket','polling'] });
