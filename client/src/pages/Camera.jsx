@@ -42,6 +42,7 @@ export default function Camera() {
   const timerRef = useRef(null);
   const trackRef = useRef(null);
   const peersRef = useRef(new Map()); // peerId -> RTCPeerConnection
+  const iceQueuesRef = useRef(new Map()); // peerId -> RTCIceCandidateInit[]
 
   const resMap = {
     '480p': { width: 854, height: 480 },
@@ -211,6 +212,11 @@ export default function Camera() {
     const pc = peersRef.current.get(fromId);
     if (pc && pc.signalingState !== 'stable') {
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const queue = iceQueuesRef.current.get(fromId);
+      if (queue) {
+        queue.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
+        iceQueuesRef.current.delete(fromId);
+      }
     }
   }, []);
 
@@ -218,7 +224,12 @@ export default function Camera() {
   const handleIceCandidate = useCallback(async ({ fromId, candidate }) => {
     const pc = peersRef.current.get(fromId);
     if (pc) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { /* ignore */ }
+      if (pc.remoteDescription) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { /* ignore */ }
+      } else {
+        if (!iceQueuesRef.current.has(fromId)) iceQueuesRef.current.set(fromId, []);
+        iceQueuesRef.current.get(fromId).push(candidate);
+      }
     }
   }, []);
 
@@ -226,6 +237,7 @@ export default function Camera() {
   const handlePeerLeft = useCallback(({ peerId }) => {
     const pc = peersRef.current.get(peerId);
     if (pc) { pc.close(); peersRef.current.delete(peerId); }
+    iceQueuesRef.current.delete(peerId);
     setViewers(peersRef.current.size);
     if (peersRef.current.size === 0) setStreaming(false);
   }, []);
