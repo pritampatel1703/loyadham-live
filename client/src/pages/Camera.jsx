@@ -11,6 +11,7 @@ export default function Camera() {
   const [status, setStatus] = useState('connecting');
   const [deviceName, setDeviceName] = useState('');
   const [deviceId, setDeviceId] = useState('');
+  const deviceIdRef = useRef('');
   const [facingMode, setFacingMode] = useState('environment');
   const [isMuted, setIsMuted] = useState(false);
   const [isTorch, setIsTorch] = useState(false);
@@ -175,7 +176,7 @@ export default function Camera() {
         sigSocketRef.current.emit('ice-candidate', {
           targetId: peerId,
           candidate: e.candidate,
-          streamId: deviceId,
+          streamId: deviceIdRef.current,
         });
       }
     };
@@ -201,11 +202,11 @@ export default function Camera() {
     sigSocketRef.current.emit('offer', {
       targetId: peerId,
       sdp: pc.localDescription,
-      streamId: deviceId,
+      streamId: deviceIdRef.current,
     });
     setViewers(peersRef.current.size);
     setStreaming(true);
-  }, [createPeerConnection, deviceId]);
+  }, [createPeerConnection]);
 
   // Handle answer from production viewer
   const handleAnswer = useCallback(async ({ fromId, sdp }) => {
@@ -334,6 +335,7 @@ export default function Camera() {
 
     devSock.on('device:registered', async ({ device_id, device_name }) => {
       setDeviceId(device_id);
+      deviceIdRef.current = device_id;
       setDeviceName(device_name);
       setStatus('live');
       timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);

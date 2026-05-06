@@ -66,18 +66,22 @@ export default function Production() {
 
     // Mark as pending so we don't double-join
     peerConns.current[deviceId] = 'pending';
+    console.log('[Production] connectToCamera:', deviceId, 'socket.connected:', signalingSocket.connected);
 
     // If socket is connected, join immediately. Otherwise queue for later.
     const roomId = `camera-${deviceId}`;
     if (signalingSocket.connected) {
       signalingSocket.emit('join-room', { roomId });
+      console.log('[Production] Joined room:', roomId);
     } else {
       pendingRooms.current.push(roomId);
+      console.log('[Production] Queued room:', roomId);
     }
   }, []);
 
   // Handle incoming offer from camera
   const handleCameraOffer = useCallback(async ({ fromId, sdp, streamId }) => {
+    console.log('[Production] Received offer from camera:', fromId, 'streamId:', streamId);
     // Close any stale/pending connection for this device
     const existing = peerConns.current[streamId];
     if (existing && existing !== 'pending' && typeof existing === 'object') {
@@ -89,6 +93,7 @@ export default function Production() {
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
+      console.log('[Production] Got video track from camera:', streamId);
       remoteStreams.current[streamId] = e.streams[0];
       const videoEl = videoRefs.current[streamId];
       if (videoEl) {
@@ -106,6 +111,7 @@ export default function Production() {
     };
 
     pc.onconnectionstatechange = () => {
+      console.log('[Production] Connection state:', streamId, pc.connectionState);
       if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
         pc.close();
         delete peerConns.current[streamId];
