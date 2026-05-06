@@ -26,6 +26,7 @@ export default function Production() {
   const [transSpeed, setTransSpeed] = useState(1);
   const timerRef = useRef(null);
   const recTimerRef = useRef(null);
+  const containerRef = useRef(null);
   const videoRefs = useRef({});  // deviceId -> video element
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
@@ -192,8 +193,11 @@ export default function Production() {
 
   const toggleFTB = () => { setIsFTB(f => !f); };
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-    else document.exitFullscreen().catch(() => {});
+    if (!document.fullscreenElement && containerRef.current) {
+      containerRef.current.requestFullscreen().catch(() => {});
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
   };
 
   const addInput = async () => {
@@ -233,7 +237,7 @@ export default function Production() {
   }, [devices, pgm, pvw]);
 
   return (
-    <div className="vmix-container">
+    <div className="vmix-container" ref={containerRef}>
       {/* 1. TOP MENU BAR */}
       <div className="vmix-topbar">
         <div className="vmix-menu-group">
