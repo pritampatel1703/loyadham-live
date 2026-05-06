@@ -14,13 +14,6 @@ export default function ProgramOutput() {
   const videoRefs = useRef({});
   const iceQueues = useRef({});
 
-  const forceHighBitrateSDP = (sdp) => {
-    const lines = sdp.split('\r\n');
-    const idx = lines.findIndex(l => l.startsWith('m=video'));
-    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:6000');
-    return lines.join('\r\n');
-  };
-
   // 1. Fetch initial state
   const loadDevices = useCallback(async () => {
     try {
@@ -86,7 +79,6 @@ export default function ProgramOutput() {
     }
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();
-    answer.sdp = forceHighBitrateSDP(answer.sdp);
     await pc.setLocalDescription(answer);
     signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
 
