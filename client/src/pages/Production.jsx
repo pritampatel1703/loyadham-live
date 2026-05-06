@@ -62,112 +62,124 @@ export default function Production() {
 
   // ── WebRTC: Connect to each online device's camera stream ──
   const connectToCamera = useCallback((deviceId) => {
-    if (peerConns.current[deviceId]) return; // already connected or pending
+    const existing = peerConns.current[deviceId];
+    if (existing && typeof existing === 'object') return;
 
-    // Mark as pending so we don't double-join
     peerConns.current[deviceId] = 'pending';
-    console.log('[Production] connectToCamera:', deviceId, 'socket.connected:', signalingSocket.connected);
+    console.log('[Production] connectToCamera:', deviceId, 'connected:', signalingSocket.connected);
 
-    // If socket is connected, join immediately. Otherwise queue for later.
     const roomId = `camera-${deviceId}`;
     if (signalingSocket.connected) {
       signalingSocket.emit('join-room', { roomId });
-      console.log('[Production] Joined room:', roomId);
     } else {
       pendingRooms.current.push(roomId);
-      console.log('[Production] Queued room:', roomId);
+    }
+  }, []);
+
+  // Helper: attach stream to video element with retry
+  const attachStream = useCallback((deviceId, stream) => {
+    const el = videoRefs.current[deviceId];
+    if (el) {
+      el.srcObject = stream;
+      el.play().catch(() => {});
+    } else {
+      requestAnimationFrame(() => {
+        const el2 = videoRefs.current[deviceId];
+        if (el2) { el2.srcObject = stream; el2.play().catch(() => {}); }
+      });
     }
   }, []);
 
   // Handle incoming offer from camera
   const handleCameraOffer = useCallback(async ({ fromId, sdp, streamId }) => {
-    console.log('[Production] Received offer from camera:', fromId, 'streamId:', streamId);
-    // Close any stale/pending connection for this device
-    const existing = peerConns.current[streamId];
-    if (existing && existing !== 'pending' && typeof existing === 'object') {
-      try { existing.close(); } catch(e) {}
+    console.log('[Production] Offer received. fromId:', fromId, 'streamId:', streamId);
+
+    const old = peerConns.current[streamId];
+    if (old && typeof old === 'object' && old.close) {
+      try { old.close(); } catch(e) {}
     }
 
-    // Create a fresh peer connection with the camera's REAL socket ID
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
-      console.log('[Production] Got video track from camera:', streamId);
+      console.log('[Production] ontrack:', streamId);
       remoteStreams.current[streamId] = e.streams[0];
-      const videoEl = videoRefs.current[streamId];
-      if (videoEl) {
-        videoEl.srcObject = e.streams[0];
-        videoEl.play().catch(() => {});
-      }
+      attachStream(streamId, e.streams[0]);
       setUpdateTrigger(t => t + 1);
     };
 
-    // CRITICAL: Send ICE candidates to the camera's ACTUAL socket ID, not a room name
     pc.onicecandidate = (e) => {
       if (e.candidate) {
         signalingSocket.emit('ice-candidate', { targetId: fromId, candidate: e.candidate, streamId });
       }
     };
 
+    pc.oniceconnectionstatechange = () => {
+      console.log('[Production] ICE:', streamId, pc.iceConnectionState);
+    };
+
     pc.onconnectionstatechange = () => {
-      console.log('[Production] Connection state:', streamId, pc.connectionState);
-      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+      console.log('[Production] Conn:', streamId, pc.connectionState);
+      if (pc.connectionState === 'failed') {
         pc.close();
+        delete peerConns.current[streamId];
+        delete remoteStreams.current[streamId];
+        setTimeout(() => {
+          peerConns.current[streamId] = 'pending';
+          signalingSocket.emit('join-room', { roomId: `camera-${streamId}` });
+        }, 2000);
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
         delete peerConns.current[streamId];
         delete remoteStreams.current[streamId];
       }
     };
 
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
+      console.log('[Production] Answer sent to:', fromId);
 
-    // Drain any queued ICE candidates
-    if (iceQueues.current[streamId]) {
-      iceQueues.current[streamId].forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
-      delete iceQueues.current[streamId];
+      const queue = iceQueues.current[streamId];
+      if (queue && queue.length > 0) {
+        queue.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
+        delete iceQueues.current[streamId];
+      }
+    } catch (err) {
+      console.error('[Production] Offer handling error:', err);
     }
-  }, []);
+  }, [attachStream]);
 
-  // Setup signaling socket for receiving camera feeds
+  // Setup signaling socket
   useEffect(() => {
     signalingSocket.connect();
 
-    // When socket connects/reconnects, drain pending room joins
     const onConnect = () => {
-      pendingRooms.current.forEach(roomId => signalingSocket.emit('join-room', { roomId }));
+      console.log('[Production] Socket connected:', signalingSocket.id);
+      const rooms = [...pendingRooms.current];
       pendingRooms.current = [];
-      // Re-join for any devices still in 'pending' state
+      rooms.forEach(roomId => signalingSocket.emit('join-room', { roomId }));
       Object.entries(peerConns.current).forEach(([devId, val]) => {
-        if (val === 'pending') {
-          signalingSocket.emit('join-room', { roomId: `camera-${devId}` });
-        }
+        if (val === 'pending') signalingSocket.emit('join-room', { roomId: `camera-${devId}` });
       });
     };
+
     signalingSocket.on('connect', onConnect);
     if (signalingSocket.connected) onConnect();
 
     signalingSocket.on('offer', handleCameraOffer);
-    signalingSocket.on('ice-candidate', async ({ fromId, candidate, streamId }) => {
-      if (streamId) {
-        const pc = peerConns.current[streamId];
-        if (pc && typeof pc === 'object' && pc.remoteDescription) {
-          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
-        } else {
-          if (!iceQueues.current[streamId]) iceQueues.current[streamId] = [];
-          iceQueues.current[streamId].push(candidate);
-        }
+
+    signalingSocket.on('ice-candidate', ({ fromId, candidate, streamId }) => {
+      const key = streamId || Object.keys(peerConns.current).find(k => typeof peerConns.current[k] === 'object');
+      if (!key) return;
+      const pc = peerConns.current[key];
+      if (pc && typeof pc === 'object' && pc.remoteDescription) {
+        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       } else {
-        for (const [devId, pc] of Object.entries(peerConns.current)) {
-          if (typeof pc === 'object' && pc.remoteDescription) {
-            try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
-          } else {
-            if (!iceQueues.current[devId]) iceQueues.current[devId] = [];
-            iceQueues.current[devId].push(candidate);
-          }
-        }
+        if (!iceQueues.current[key]) iceQueues.current[key] = [];
+        iceQueues.current[key].push(candidate);
       }
     });
 
@@ -176,7 +188,7 @@ export default function Production() {
       signalingSocket.off('offer');
       signalingSocket.off('ice-candidate');
       signalingSocket.disconnect();
-      Object.values(peerConns.current).forEach(pc => { if (typeof pc === 'object' && pc.close) pc.close(); });
+      Object.values(peerConns.current).forEach(v => { if (typeof v === 'object' && v.close) v.close(); });
       peerConns.current = {};
     };
   }, [handleCameraOffer]);
