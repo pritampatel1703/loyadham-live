@@ -33,6 +33,7 @@ export default function Production() {
   const iceQueues = useRef({});
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
+  const pendingRooms = useRef([]); // rooms to join once socket connects
   const [updateTrigger, setUpdateTrigger] = useState(0);
 
   const load = async () => {
@@ -66,8 +67,13 @@ export default function Production() {
     // Mark as pending so we don't double-join
     peerConns.current[deviceId] = 'pending';
 
-    // Join the camera's signaling room — the camera will send us an offer
-    signalingSocket.emit('join-room', { roomId: `camera-${deviceId}` });
+    // If socket is connected, join immediately. Otherwise queue for later.
+    const roomId = `camera-${deviceId}`;
+    if (signalingSocket.connected) {
+      signalingSocket.emit('join-room', { roomId });
+    } else {
+      pendingRooms.current.push(roomId);
+    }
   }, []);
 
   // Handle incoming offer from camera
@@ -123,11 +129,25 @@ export default function Production() {
   useEffect(() => {
     signalingSocket.connect();
 
+    // When socket connects/reconnects, drain pending room joins
+    const onConnect = () => {
+      pendingRooms.current.forEach(roomId => signalingSocket.emit('join-room', { roomId }));
+      pendingRooms.current = [];
+      // Re-join for any devices still in 'pending' state
+      Object.entries(peerConns.current).forEach(([devId, val]) => {
+        if (val === 'pending') {
+          signalingSocket.emit('join-room', { roomId: `camera-${devId}` });
+        }
+      });
+    };
+    signalingSocket.on('connect', onConnect);
+    if (signalingSocket.connected) onConnect();
+
     signalingSocket.on('offer', handleCameraOffer);
     signalingSocket.on('ice-candidate', async ({ fromId, candidate, streamId }) => {
       if (streamId) {
         const pc = peerConns.current[streamId];
-        if (pc && pc.remoteDescription) {
+        if (pc && typeof pc === 'object' && pc.remoteDescription) {
           try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
         } else {
           if (!iceQueues.current[streamId]) iceQueues.current[streamId] = [];
@@ -135,7 +155,7 @@ export default function Production() {
         }
       } else {
         for (const [devId, pc] of Object.entries(peerConns.current)) {
-          if (pc.remoteDescription) {
+          if (typeof pc === 'object' && pc.remoteDescription) {
             try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
           } else {
             if (!iceQueues.current[devId]) iceQueues.current[devId] = [];
@@ -146,10 +166,11 @@ export default function Production() {
     });
 
     return () => {
+      signalingSocket.off('connect', onConnect);
       signalingSocket.off('offer');
       signalingSocket.off('ice-candidate');
       signalingSocket.disconnect();
-      Object.values(peerConns.current).forEach(pc => pc.close());
+      Object.values(peerConns.current).forEach(pc => { if (typeof pc === 'object' && pc.close) pc.close(); });
       peerConns.current = {};
     };
   }, [handleCameraOffer]);
