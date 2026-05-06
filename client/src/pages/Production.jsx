@@ -28,8 +28,11 @@ export default function Production() {
   const recTimerRef = useRef(null);
   const containerRef = useRef(null);
   const videoRefs = useRef({});  // deviceId -> video element
+  const pgmVideoRef = useRef(null);
+  const pvwVideoRef = useRef(null);
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
+  const [updateTrigger, setUpdateTrigger] = useState(0);
 
   const load = async () => {
     try {
@@ -104,6 +107,7 @@ export default function Production() {
           videoEl.srcObject = e.streams[0];
           videoEl.play().catch(() => {});
         }
+        setUpdateTrigger(t => t + 1);
       };
 
       pc.onicecandidate = (e) => {
@@ -243,6 +247,29 @@ export default function Production() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [devices, pgm, pvw]);
 
+  // Sync monitors when pvw/pgm changes or a stream connects
+  useEffect(() => {
+    if (pvw && pvwVideoRef.current && remoteStreams.current[pvw]) {
+      if (pvwVideoRef.current.srcObject !== remoteStreams.current[pvw]) {
+        pvwVideoRef.current.srcObject = remoteStreams.current[pvw];
+        pvwVideoRef.current.play().catch(()=>{});
+      }
+    } else if (pvwVideoRef.current) {
+      pvwVideoRef.current.srcObject = null;
+    }
+  }, [pvw, updateTrigger]);
+
+  useEffect(() => {
+    if (pgm && pgmVideoRef.current && remoteStreams.current[pgm]) {
+      if (pgmVideoRef.current.srcObject !== remoteStreams.current[pgm]) {
+        pgmVideoRef.current.srcObject = remoteStreams.current[pgm];
+        pgmVideoRef.current.play().catch(()=>{});
+      }
+    } else if (pgmVideoRef.current) {
+      pgmVideoRef.current.srcObject = null;
+    }
+  }, [pgm, updateTrigger]);
+
   return (
     <div className="vmix-container" ref={containerRef}>
       {/* 1. TOP MENU BAR */}
@@ -274,12 +301,16 @@ export default function Production() {
             <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pvwDevice?.name || 'Blank'}</span>
           </div>
           <div className="vmix-monitor-video">
-            {pvwDevice?.is_online ? (
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ fontSize: '3rem' }}>📹</span>
-                <div style={{ fontWeight: 600, fontSize: '1rem', marginTop: 4 }}>{pvwDevice.name}</div>
-              </div>
-            ) : <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PVW OFFLINE</span>}
+            <video 
+              ref={pvwVideoRef}
+              autoPlay 
+              playsInline 
+              muted 
+              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: pvwDevice?.is_online ? 'block' : 'none' }}
+            />
+            {!pvwDevice?.is_online && (
+              <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PVW OFFLINE</span>
+            )}
           </div>
         </div>
 
@@ -311,12 +342,16 @@ export default function Production() {
             <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pgmDevice?.name || 'Blank'}</span>
           </div>
           <div className="vmix-monitor-video">
-            {pgmDevice?.is_online ? (
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ fontSize: '3rem' }}>📹</span>
-                <div style={{ fontWeight: 600, fontSize: '1rem', marginTop: 4 }}>{pgmDevice.name}</div>
-              </div>
-            ) : <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PGM OFFLINE</span>}
+            <video 
+              ref={pgmVideoRef}
+              autoPlay 
+              playsInline 
+              muted 
+              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: pgmDevice?.is_online ? 'block' : 'none' }}
+            />
+            {!pgmDevice?.is_online && (
+              <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PGM OFFLINE</span>
+            )}
             {isLive && (
               <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,.7)', padding: '4px 8px', borderRadius: 4, border: '1px solid #ef4444', color: '#ef4444', fontWeight: 700, fontSize: '.75rem', animation: 'pulse-badge 2s infinite' }}>
                 REC {fmtTime(elapsed)}
