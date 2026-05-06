@@ -3,7 +3,7 @@ services:
     name: pixel-perfect-server
     env: node
     rootDir: ./
-    buildCommand: cd client && npm install && npm run build && cd ../server && npm install
+    buildCommand: cd client && npm install --include=dev && npm run build && cd ../server && npm install
     startCommand: cd server && NODE_ENV=production node server.js
     plan: free
     healthCheckPath: /health
