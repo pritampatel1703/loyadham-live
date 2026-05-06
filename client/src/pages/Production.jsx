@@ -238,31 +238,33 @@ export default function Production() {
     }).catch(() => alert('Failed to copy.'));
   };
 
-  const openPgmDisplay = async () => {
-    const token = localStorage.getItem('ag_token');
-    const url = `${window.location.origin}/output/pgm?token=${token}`;
+  const fullscreenPgm = async () => {
+    if (!pgmVideoRef.current) return;
+    if (document.fullscreenElement === pgmVideoRef.current) {
+      document.exitFullscreen().catch(()=>{});
+      return;
+    }
     
     try {
       if ('getScreenDetails' in window) {
         const screenDetails = await window.getScreenDetails();
-        const externalScreen = screenDetails.screens.find(s => s !== screenDetails.currentScreen) || screenDetails.currentScreen;
-        const features = `left=${externalScreen.availLeft},top=${externalScreen.availTop},width=${externalScreen.availWidth},height=${externalScreen.availHeight},popup=yes`;
-        const newWin = window.open(url, 'HDMI', features);
-        if (newWin) return;
+        const externalScreen = screenDetails.screens.find(s => s !== screenDetails.currentScreen);
+        if (externalScreen) {
+          await pgmVideoRef.current.requestFullscreen({ screen: externalScreen }).catch(()=>{});
+          return;
+        }
       }
     } catch (e) {
-      console.warn('Screen details API failed or denied', e);
+      console.warn('Screen Details API not supported or denied. Using standard fullscreen.');
     }
     
-    window.open(url, '_blank', 'popup=yes');
+    pgmVideoRef.current.requestFullscreen().catch(()=>{});
   };
 
-  const togglePgmFullscreen = () => {
-    if (!document.fullscreenElement && pgmVideoRef.current) {
-      pgmVideoRef.current.requestFullscreen().catch(()=>{});
-    } else if (document.fullscreenElement) {
-      document.exitFullscreen().catch(()=>{});
-    }
+  const openPgmDisplay = () => {
+    const token = localStorage.getItem('ag_token');
+    const url = `${window.location.origin}/output/pgm?token=${token}`;
+    window.open(url, '_blank');
   };
 
   const addInput = async () => {
@@ -392,12 +394,18 @@ export default function Production() {
 
         {/* PROGRAM MONITOR (Right, Red) */}
         <div className="vmix-monitor-container">
-          <div className="vmix-monitor-header pgm">
-            <div style={{display:'flex',gap:8,alignItems:'baseline'}}>
+          <div className="vmix-monitor-header pgm" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
               <span>PROGRAM</span>
-              <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pgmDevice?.name || 'Blank'}</span>
+              <span style={{ fontSize: '.7rem', opacity: 0.9, marginLeft: 8 }}>{pgmDevice?.name || 'Blank'}</span>
             </div>
-            <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', outline: 'none' }} onClick={togglePgmFullscreen} title="Fullscreen Program Video">⛶</button>
+            <button 
+              onClick={fullscreenPgm} 
+              style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
+              title="Fullscreen Program (can target secondary monitors)"
+            >
+              ⛶
+            </button>
           </div>
           <div className="vmix-monitor-video">
             <video 
