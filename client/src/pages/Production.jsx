@@ -238,10 +238,31 @@ export default function Production() {
     }).catch(() => alert('Failed to copy.'));
   };
 
-  const openPgmDisplay = () => {
+  const openPgmDisplay = async () => {
     const token = localStorage.getItem('ag_token');
     const url = `${window.location.origin}/output/pgm?token=${token}`;
-    window.open(url, '_blank');
+    
+    try {
+      if ('getScreenDetails' in window) {
+        const screenDetails = await window.getScreenDetails();
+        const externalScreen = screenDetails.screens.find(s => s !== screenDetails.currentScreen) || screenDetails.currentScreen;
+        const features = `left=${externalScreen.availLeft},top=${externalScreen.availTop},width=${externalScreen.availWidth},height=${externalScreen.availHeight},popup=yes`;
+        const newWin = window.open(url, 'HDMI', features);
+        if (newWin) return;
+      }
+    } catch (e) {
+      console.warn('Screen details API failed or denied', e);
+    }
+    
+    window.open(url, '_blank', 'popup=yes');
+  };
+
+  const togglePgmFullscreen = () => {
+    if (!document.fullscreenElement && pgmVideoRef.current) {
+      pgmVideoRef.current.requestFullscreen().catch(()=>{});
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(()=>{});
+    }
   };
 
   const addInput = async () => {
@@ -372,8 +393,11 @@ export default function Production() {
         {/* PROGRAM MONITOR (Right, Red) */}
         <div className="vmix-monitor-container">
           <div className="vmix-monitor-header pgm">
-            <span>PROGRAM</span>
-            <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pgmDevice?.name || 'Blank'}</span>
+            <div style={{display:'flex',gap:8,alignItems:'baseline'}}>
+              <span>PROGRAM</span>
+              <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pgmDevice?.name || 'Blank'}</span>
+            </div>
+            <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', outline: 'none' }} onClick={togglePgmFullscreen} title="Fullscreen Program Video">⛶</button>
           </div>
           <div className="vmix-monitor-video">
             <video 
