@@ -215,6 +215,55 @@ tr:hover td{background:var(--bg-card-hover)}
 @keyframes slideIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
 @keyframes glow{0%,100%{box-shadow:0 0 5px var(--accent-glow)}50%{box-shadow:0 0 20px var(--accent-glow),0 0 40px var(--accent-glow)}}
 
+/* ═══ VMIX UI OVERHAUL ═══ */
+.vmix-container{background:#1a1c23;height:calc(100vh - var(--header-h));display:flex;flex-direction:column;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;color:#e2e8f0;overflow:hidden}
+
+/* Top Menu Bar */
+.vmix-topbar{background:#0f1115;height:32px;display:flex;align-items:center;padding:0 8px;font-size:.75rem;border-bottom:1px solid #000}
+.vmix-menu-group{display:flex;border-right:1px solid #2d3748;height:100%;align-items:center}
+.vmix-menu-btn{background:transparent;border:none;color:#cbd5e1;padding:0 12px;height:100%;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px}
+.vmix-menu-btn:hover{background:#334155;color:#fff}
+
+/* Monitors Row */
+.vmix-monitors-row{display:flex;height:45%;min-height:0;background:#1a1c23;padding:8px;gap:8px}
+.vmix-monitor-container{flex:1;display:flex;flex-direction:column;background:#000;border:1px solid #000;box-shadow:0 4px 6px -1px rgba(0,0,0,.5)}
+.vmix-monitor-header{height:24px;display:flex;align-items:center;padding:0 8px;font-size:.8rem;font-weight:700;color:#fff;justify-content:space-between}
+.vmix-monitor-header.pvw{background:#22c55e} /* Green for PVW (Standard) */
+.vmix-monitor-header.pgm{background:#ef4444} /* Red for PGM (Standard) */
+.vmix-monitor-video{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
+
+/* Central Transition Bar */
+.vmix-trans-bar{width:100px;background:#2d3748;border:1px solid #000;display:flex;flex-direction:column;padding:4px;gap:4px;overflow-y:auto}
+.vmix-trans-btn{background:linear-gradient(180deg,#475569,#334155);border:1px solid #0f1115;border-radius:2px;color:#f8fafc;font-size:.7rem;font-weight:600;padding:6px 0;cursor:pointer;text-align:center}
+.vmix-trans-btn:active{background:#1e293b;border-top-color:#000}
+.vmix-trans-row{display:flex;gap:2px}
+.vmix-trans-row button{flex:1;padding:4px 0}
+
+/* Middle Divider (Audio Mixer etc) */
+.vmix-divider{height:28px;background:#1e293b;border-top:1px solid #475569;border-bottom:1px solid #0f1115;display:flex;align-items:center;padding:0 8px;justify-content:space-between}
+
+/* Inputs Grid */
+.vmix-inputs-area{flex:1;background:#1a1c23;padding:8px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start}
+.vmix-input{width:calc(25% - 6px);min-width:240px;background:#000;border:1px solid #000;display:flex;flex-direction:column;box-shadow:0 2px 4px rgba(0,0,0,.5)}
+.vmix-input-header{height:22px;display:flex;align-items:center;padding:0 6px;font-size:.7rem;font-weight:700;color:#fff;justify-content:space-between;cursor:pointer}
+.vmix-input-header.idle{background:linear-gradient(180deg,#334155,#1e293b)}
+.vmix-input-header.pvw{background:#22c55e}
+.vmix-input-header.pgm{background:#ef4444}
+.vmix-input-video{aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
+.vmix-input-footer{background:#1e293b;height:24px;display:flex;align-items:center;padding:0 4px;gap:4px;border-top:1px solid #000}
+.vmix-input-btn{background:#334155;border:1px solid #0f1115;color:#fff;font-size:.6rem;padding:2px 6px;cursor:pointer;border-radius:2px}
+.vmix-input-btn:hover{background:#475569}
+
+/* Bottom Status Bar */
+.vmix-bottom-bar{background:#0f1115;display:flex;flex-direction:column;border-top:1px solid #334155}
+.vmix-bottom-controls{height:36px;display:flex;align-items:center;padding:0 8px;gap:12px}
+.vmix-action-btn{background:linear-gradient(180deg,#334155,#1e293b);border:1px solid #000;color:#cbd5e1;font-size:.75rem;font-weight:600;padding:6px 12px;border-radius:2px;cursor:pointer;display:flex;align-items:center;gap:6px}
+.vmix-action-btn:hover{background:linear-gradient(180deg,#475569,#334155)}
+.vmix-action-btn.active{background:#ef4444;color:#fff}
+.vmix-bottom-stats{height:20px;background:#000;display:flex;align-items:center;padding:0 8px;font-size:.65rem;color:#94a3b8;gap:16px;font-family:Consolas,monospace}
+.vmix-stat-item{display:flex;gap:4px}
+.vmix-stat-val{color:#fff;font-weight:700}
+
 /* ═══ RESPONSIVE ═══ */
 @media(max-width:1200px){.production-layout{grid-template-columns:1fr;grid-template-rows:auto 1fr auto auto}.production-left,.production-right{grid-row:auto}}
 @media(max-width:768px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.main-area{margin-left:0}.stats-grid{grid-template-columns:1fr 1fr}.device-grid{grid-template-columns:1fr}.page-content{padding:12px}.multiview.grid-3x3{grid-template-columns:1fr 1fr}}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { analyticsApi } from '../api/client';
 import { Chart, registerables } from 'chart.js';
 import { Line } from 'react-chartjs-2';

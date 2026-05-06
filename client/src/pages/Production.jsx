@@ -1,12 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { devicesApi, analyticsApi, streamsApi, vmixApi } from '../api/client';
-import { productionSocket } from '../socket';
+import { productionSocket, signalingSocket } from '../socket';
+import { ICE_SERVERS } from '../webrtc';
 
 export default function Production() {
   const [devices, setDevices] = useState([]);
-  const [allDevices, setAllDevices] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [grid, setGrid] = useState('2x2');
   const [pgm, setPgm] = useState(null);
   const [pvw, setPvw] = useState(null);
   const [elapsed, setElapsed] = useState(0);
@@ -15,13 +14,26 @@ export default function Production() {
   const [vmixActive, setVmixActive] = useState(null);
   const [vmixStatus, setVmixStatus] = useState(null);
   const [fullscreen, setFullscreen] = useState(null);
+  const [showAddInput, setShowAddInput] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', label: '', group_name: 'Default' });
+  const [isRecording, setIsRecording] = useState(false);
+  const [recElapsed, setRecElapsed] = useState(0);
+  const [isFTB, setIsFTB] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAudioMixer, setShowAudioMixer] = useState(false);
+  const [overlayActive, setOverlayActive] = useState(false);
+  const [transSpeed, setTransSpeed] = useState(1);
   const timerRef = useRef(null);
+  const recTimerRef = useRef(null);
+  const videoRefs = useRef({});  // deviceId -> video element
+  const peerConns = useRef({});  // deviceId -> RTCPeerConnection
+  const remoteStreams = useRef({}); // deviceId -> MediaStream
 
   const load = async () => {
     try {
       const [d, l, v] = await Promise.all([devicesApi.list(), analyticsApi.logs('', 30), vmixApi.connections()]);
       const devs = d.devices || [];
-      setAllDevices(devs);
       setDevices(devs.length > 0 ? devs : demoCams);
       setLogs(l.logs || []);
       setVmixConns(v.connections || []);
@@ -42,6 +54,98 @@ export default function Production() {
     return () => { clearInterval(id); productionSocket.disconnect(); };
   }, []);
 
+  // ── WebRTC: Connect to each online device's camera stream ──
+  const connectToCamera = useCallback((deviceId) => {
+    if (peerConns.current[deviceId]) return; // already connected
+    
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    peerConns.current[deviceId] = pc;
+
+    pc.ontrack = (e) => {
+      remoteStreams.current[deviceId] = e.streams[0];
+      const videoEl = videoRefs.current[deviceId];
+      if (videoEl) {
+        videoEl.srcObject = e.streams[0];
+        videoEl.play().catch(() => {});
+      }
+    };
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        signalingSocket.emit('ice-candidate', { targetId: `camera-${deviceId}`, candidate: e.candidate });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+        pc.close();
+        delete peerConns.current[deviceId];
+        delete remoteStreams.current[deviceId];
+      }
+    };
+
+    // Join the camera's signaling room
+    signalingSocket.emit('join-room', { roomId: `camera-${deviceId}` });
+  }, []);
+
+  // Handle incoming offer from camera
+  const handleCameraOffer = useCallback(async ({ fromId, sdp, streamId }) => {
+    // streamId is the device_id
+    let pc = peerConns.current[streamId];
+    if (!pc) {
+      pc = new RTCPeerConnection(ICE_SERVERS);
+      peerConns.current[streamId] = pc;
+      
+      pc.ontrack = (e) => {
+        remoteStreams.current[streamId] = e.streams[0];
+        const videoEl = videoRefs.current[streamId];
+        if (videoEl) {
+          videoEl.srcObject = e.streams[0];
+          videoEl.play().catch(() => {});
+        }
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          signalingSocket.emit('ice-candidate', { targetId: fromId, candidate: e.candidate });
+        }
+      };
+    }
+
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
+  }, []);
+
+  // Setup signaling socket for receiving camera feeds
+  useEffect(() => {
+    signalingSocket.connect();
+
+    signalingSocket.on('offer', handleCameraOffer);
+    signalingSocket.on('ice-candidate', async ({ fromId, candidate }) => {
+      // Find which PC this candidate belongs to
+      for (const [devId, pc] of Object.entries(peerConns.current)) {
+        if (pc.remoteDescription) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { /* ignore */ }
+        }
+      }
+    });
+
+    return () => {
+      signalingSocket.off('offer');
+      signalingSocket.off('ice-candidate');
+      signalingSocket.disconnect();
+      Object.values(peerConns.current).forEach(pc => pc.close());
+      peerConns.current = {};
+    };
+  }, [handleCameraOffer]);
+
+  // Auto-connect to online devices
+  useEffect(() => {
+    devices.filter(d => d.is_online).forEach(d => connectToCamera(d.id));
+  }, [devices, connectToCamera]);
+
   useEffect(() => {
     if (!vmixActive) return;
     const poll = () => vmixApi.status(vmixActive).then(d => { if (d.success) setVmixStatus(d.status); }).catch(() => {});
@@ -61,8 +165,17 @@ export default function Production() {
   const selectPvw = (id) => { setPvw(id); devicesApi.setTally(id, 'preview').catch(() => {}); if (pvw && pvw !== id) devicesApi.setTally(pvw, pgm === pvw ? 'program' : 'off').catch(() => {}); };
 
   const doCut = () => { if (pvw) { const old = pgm; selectPgm(pvw); if (old) selectPvw(old); } };
-  const doFade = () => { doCut(); };
-  const doAutoTransition = () => { doCut(); };
+  const doFade = () => {
+    if (!pvw) return;
+    // Simulate a fade by delaying the cut
+    const old = pgm;
+    setTimeout(() => { selectPgm(pvw); if (old) selectPvw(old); }, transSpeed * 500);
+  };
+  const doAutoTransition = () => {
+    if (!pvw) return;
+    const old = pgm;
+    setTimeout(() => { selectPgm(pvw); if (old) selectPvw(old); }, transSpeed * 250);
+  };
 
   const doVmixAction = async (action, params) => {
     if (!vmixActive) return;
@@ -72,227 +185,256 @@ export default function Production() {
   const goLive = () => { setIsLive(true); setElapsed(0); timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000); };
   const goOff = () => { setIsLive(false); clearInterval(timerRef.current); setElapsed(0); };
 
+  const toggleRecord = () => {
+    if (isRecording) { setIsRecording(false); clearInterval(recTimerRef.current); setRecElapsed(0); }
+    else { setIsRecording(true); setRecElapsed(0); recTimerRef.current = setInterval(() => setRecElapsed(s => s + 1), 1000); }
+  };
+
+  const toggleFTB = () => { setIsFTB(f => !f); };
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen().catch(() => {});
+  };
+
+  const addInput = async () => {
+    try { await devicesApi.create(addForm); setShowAddInput(false); setAddForm({ name: '', label: '', group_name: 'Default' }); load(); } catch (e) { alert(e.message); }
+  };
+  const deleteInput = async (id) => {
+    if (!confirm('Remove this input?')) return;
+    try { await devicesApi.delete(id); load(); } catch (e) { alert(e.message); }
+  };
+
   const fmtTime = (s) => { const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); const sec = s%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; };
 
   const pgmDevice = devices.find(d => d.id === pgm);
   const pvwDevice = devices.find(d => d.id === pvw);
-  const gridCount = grid === '1x1' ? 1 : grid === '2x2' ? 4 : grid === '3x3' ? 9 : 16;
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if typing in an input field (just in case we add one later)
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+
+      if (e.code === 'Space') { e.preventDefault(); doCut(); return; }
+      if (e.code === 'Enter') { e.preventDefault(); doAutoTransition(); return; }
+
+      const num = parseInt(e.key, 10);
+      if (!isNaN(num) && num > 0 && num <= devices.length) {
+        const targetDevice = devices[num - 1];
+        if (e.shiftKey) {
+          selectPvw(targetDevice.id);
+        } else {
+          selectPgm(targetDevice.id);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [devices, pgm, pvw]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, height: 'calc(100vh - var(--header-h) - 48px)' }}>
-
-      {/* ═══ TOP STATUS BAR ═══ */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0', marginBottom: 8 }}>
-        {isLive ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="badge badge-live" style={{ fontSize: '.85rem', padding: '5px 14px' }}><span className="badge-dot"></span>ON AIR</span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: '1.2rem', fontWeight: 700, color: 'var(--red)' }}>{fmtTime(elapsed)}</span>
-          </div>
-        ) : (
-          <span className="badge badge-offline" style={{ fontSize: '.85rem', padding: '5px 14px' }}>OFF AIR</span>
-        )}
-        <div style={{ flex: 1 }}></div>
-        <span style={{ fontSize: '.8rem', color: 'var(--text-secondary)' }}>📹 {devices.filter(d=>d.is_online).length}/{devices.length} cams</span>
-        {vmixStatus && <span className="badge badge-online" style={{ fontSize: '.7rem' }}>vMix v{vmixStatus.version}</span>}
-        <div style={{ display: 'flex', gap: 6 }}>
-          {['1x1','2x2','3x3'].map(g => <button key={g} className={`btn btn-sm ${grid===g?'btn-primary':''}`} onClick={()=>setGrid(g)} style={{padding:'4px 10px',fontSize:'.75rem'}}>{g}</button>)}
+    <div className="vmix-container">
+      {/* 1. TOP MENU BAR */}
+      <div className="vmix-topbar">
+        <div className="vmix-menu-group">
+          <button className="vmix-menu-btn">Preset</button>
+          <button className="vmix-menu-btn">New</button>
+          <button className="vmix-menu-btn">Open</button>
+          <button className="vmix-menu-btn">Save</button>
+          <button className="vmix-menu-btn">Save As</button>
+          <button className="vmix-menu-btn">Last</button>
+        </div>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+          <button className="vmix-menu-btn" onClick={toggleFullscreen}>Fullscreen</button>
+        </div>
+        <div className="vmix-menu-group" style={{ borderRight: 'none', borderLeft: '1px solid #2d3748' }}>
+          <button className="vmix-menu-btn"  style={paused?{color:'#ef4444'}:{}} onClick={() => setPaused(p => !p)}>{paused ? '▶ Resume' : '⏸ Pause'}</button>
+          <button className="vmix-menu-btn" onClick={() => setShowSettings(s => !s)}>⚙ Settings</button>
         </div>
       </div>
 
-      {/* ═══ MAIN AREA ═══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 12, flex: 1, overflow: 'hidden' }}>
-
-        {/* ═══ LEFT: Program/Preview + Multiview ═══ */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
-
-          {/* PROGRAM & PREVIEW MONITORS */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {/* PROGRAM */}
-            <div style={{ background: 'var(--bg-card)', border: '2px solid var(--red)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', position: 'relative' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'var(--red)', color: '#fff' }}>
-                <span style={{ fontWeight: 800, fontSize: '.8rem', letterSpacing: 1 }}>PROGRAM</span>
-                <span style={{ fontSize: '.7rem', fontFamily: 'var(--mono)' }}>{pgmDevice?.name || '—'}</span>
-              </div>
-              <div style={{ aspectRatio: '16/9', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                {pgmDevice ? (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #1a0000 0%, #0a0a0a 100%)' }}>
-                    <span style={{ fontSize: '2.5rem' }}>📹</span>
-                    <span style={{ fontWeight: 700, marginTop: 4, fontSize: '.9rem' }}>{pgmDevice.name}</span>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: '.7rem', fontFamily: 'var(--mono)', color: 'var(--text-secondary)' }}>
-                      <span>{pgmDevice.stream_resolution}</span><span>{pgmDevice.stream_fps}fps</span><span>{pgmDevice.stream_bitrate}kbps</span>
-                    </div>
-                  </div>
-                ) : <span style={{ color: 'var(--text-muted)', fontSize: '.9rem' }}>No source selected</span>}
-              </div>
-            </div>
-
-            {/* PREVIEW */}
-            <div style={{ background: 'var(--bg-card)', border: '2px solid var(--green)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'var(--green)', color: '#000' }}>
-                <span style={{ fontWeight: 800, fontSize: '.8rem', letterSpacing: 1 }}>PREVIEW</span>
-                <span style={{ fontSize: '.7rem', fontFamily: 'var(--mono)' }}>{pvwDevice?.name || '—'}</span>
-              </div>
-              <div style={{ aspectRatio: '16/9', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {pvwDevice ? (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #001a00 0%, #0a0a0a 100%)' }}>
-                    <span style={{ fontSize: '2.5rem' }}>📹</span>
-                    <span style={{ fontWeight: 700, marginTop: 4, fontSize: '.9rem' }}>{pvwDevice.name}</span>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: '.7rem', fontFamily: 'var(--mono)', color: 'var(--text-secondary)' }}>
-                      <span>{pvwDevice.stream_resolution}</span><span>{pvwDevice.stream_fps}fps</span><span>{pvwDevice.stream_bitrate}kbps</span>
-                    </div>
-                  </div>
-                ) : <span style={{ color: 'var(--text-muted)', fontSize: '.9rem' }}>No source selected</span>}
-              </div>
-            </div>
+      {/* 2. MONITORS ROW (Top Half) */}
+      <div className="vmix-monitors-row">
+        {/* PREVIEW MONITOR (Left, Green) */}
+        <div className="vmix-monitor-container">
+          <div className="vmix-monitor-header pvw">
+            <span>PREVIEW</span>
+            <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pvwDevice?.name || 'Blank'}</span>
           </div>
+          <div className="vmix-monitor-video">
+            {pvwDevice?.is_online ? (
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ fontSize: '3rem' }}>📹</span>
+                <div style={{ fontWeight: 600, fontSize: '1rem', marginTop: 4 }}>{pvwDevice.name}</div>
+              </div>
+            ) : <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PVW OFFLINE</span>}
+          </div>
+        </div>
 
-          {/* MULTIVIEW */}
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <div className={`multiview grid-${grid}`} style={{ height: '100%' }}>
-              {devices.slice(0, gridCount).map((d, i) => (
-                <div key={d.id} className={`mv-cell ${pgm === d.id ? 'active' : ''} ${pvw === d.id ? 'preview-active' : ''}`}
-                  style={{ border: pgm === d.id ? '2px solid var(--red)' : pvw === d.id ? '2px solid var(--green)' : undefined, cursor: 'pointer' }}
-                  onClick={() => selectPvw(d.id)} onDoubleClick={() => selectPgm(d.id)}>
-                  <div className="mv-placeholder" style={{ background: d.is_online ? 'linear-gradient(180deg, #0d1520, #080c12)' : '#0a0a0a' }}>
-                    {d.is_online ? '📹' : '⬛'}
-                  </div>
-                  {/* Tally indicator */}
-                  {pgm === d.id && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--red)' }}></div>}
-                  {pvw === d.id && pgm !== d.id && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--green)' }}></div>}
-                  {/* Label */}
-                  <div style={{ position: 'absolute', top: 6, left: 6, display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <span style={{ background: 'rgba(0,0,0,.8)', padding: '2px 8px', borderRadius: 4, fontSize: '.7rem', fontWeight: 700 }}>{i+1}</span>
-                    <span style={{ background: 'rgba(0,0,0,.7)', padding: '2px 8px', borderRadius: 4, fontSize: '.65rem' }}>{d.name}</span>
-                  </div>
-                  {/* Status badges */}
-                  <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
-                    {pgm === d.id && <span style={{ background: 'var(--red)', color: '#fff', padding: '1px 6px', borderRadius: 3, fontSize: '.6rem', fontWeight: 800 }}>PGM</span>}
-                    {pvw === d.id && <span style={{ background: 'var(--green)', color: '#000', padding: '1px 6px', borderRadius: 3, fontSize: '.6rem', fontWeight: 800 }}>PVW</span>}
-                  </div>
-                  {/* Bottom stats */}
-                  <div className="mv-cell-stats">
-                    <span>{d.stream_resolution || '—'}</span>
-                    <span>{d.stream_fps || 0}fps</span>
-                    <span>{d.stream_bitrate || 0}kbps</span>
-                    {d.battery_percent >= 0 && <span style={{ color: d.battery_percent < 20 ? 'var(--red)' : 'var(--green)' }}>🔋{d.battery_percent}%</span>}
-                  </div>
-                </div>
-              ))}
+        {/* TRANSITION BAR (Center) */}
+        <div className="vmix-trans-bar">
+          <button className="vmix-trans-btn" onClick={doCut}>Quick Play</button>
+          <button className="vmix-trans-btn" onClick={doCut}>Cut</button>
+          <button className="vmix-trans-btn" onClick={doFade}>Fade</button>
+          <button className="vmix-trans-btn" onClick={doAutoTransition}>Merge</button>
+          <button className="vmix-trans-btn" onClick={doAutoTransition}>Wipe</button>
+          <button className="vmix-trans-btn" onClick={doAutoTransition}>CubeZoom</button>
+          <button className="vmix-trans-btn" style={isFTB?{background:'#ef4444'}:{}} onClick={toggleFTB}>FTB</button>
+          
+          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div className="vmix-trans-row">{[1,2,3,4].map(n=><button key={n} className="vmix-trans-btn" style={transSpeed===n?{background:'#3b82f6'}:{}} onClick={()=>setTransSpeed(n)}>{n}</button>)}</div>
+            <div className="vmix-trans-row">{[5,6,7,8].map(n=><button key={n} className="vmix-trans-btn" style={transSpeed===n?{background:'#3b82f6'}:{}} onClick={()=>setTransSpeed(n)}>{n}</button>)}</div>
+            {/* Mock T-Bar */}
+            <div style={{ background: '#0f1115', height: 30, borderRadius: 2, marginTop: 4, position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 5, bottom: 5, left: '50%', width: 2, background: '#475569', transform: 'translateX(-50%)' }}></div>
+              <div style={{ position: 'absolute', left: 4, right: 4, top: '50%', height: 8, background: '#3b82f6', transform: 'translateY(-50%)', borderRadius: 2 }}></div>
             </div>
           </div>
         </div>
 
-        {/* ═══ RIGHT PANEL ═══ */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
-
-          {/* CAMERA SOURCE LIST — clickable to assign PGM/PVW */}
-          <div className="card" style={{ padding: 12 }}>
-            <div style={{ fontSize: '.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 8 }}>Sources</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {devices.map((d, i) => (
-                <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, background: pgm === d.id ? 'var(--red)15' : pvw === d.id ? 'var(--green)15' : 'transparent', border: `1px solid ${pgm === d.id ? 'var(--red)40' : pvw === d.id ? 'var(--green)40' : 'var(--border)'}`, cursor: 'pointer', transition: 'all .15s' }} >
-                  <span style={{ width: 22, height: 22, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.7rem', fontWeight: 800, background: pgm === d.id ? 'var(--red)' : pvw === d.id ? 'var(--green)' : 'var(--bg-secondary)', color: pgm === d.id || pvw === d.id ? '#fff' : 'var(--text-muted)' }}>{i+1}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '.8rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</div>
-                    <div style={{ fontSize: '.65rem', color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{d.is_online ? `${d.stream_resolution} · ${d.stream_fps}fps` : 'Offline'}</div>
-                  </div>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: d.is_online ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0 }}></span>
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    <button onClick={(e) => { e.stopPropagation(); selectPvw(d.id); }} style={{ padding: '2px 6px', fontSize: '.6rem', fontWeight: 800, borderRadius: 3, border: '1px solid var(--green)40', background: pvw===d.id ? 'var(--green)' : 'transparent', color: pvw===d.id ? '#000' : 'var(--green)', cursor: 'pointer' }}>PVW</button>
-                    <button onClick={(e) => { e.stopPropagation(); selectPgm(d.id); }} style={{ padding: '2px 6px', fontSize: '.6rem', fontWeight: 800, borderRadius: 3, border: '1px solid var(--red)40', background: pgm===d.id ? 'var(--red)' : 'transparent', color: pgm===d.id ? '#fff' : 'var(--red)', cursor: 'pointer' }}>PGM</button>
-                  </div>
-                </div>
-              ))}
-            </div>
+        {/* PROGRAM MONITOR (Right, Red) */}
+        <div className="vmix-monitor-container">
+          <div className="vmix-monitor-header pgm">
+            <span>PROGRAM</span>
+            <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pgmDevice?.name || 'Blank'}</span>
           </div>
-
-          {/* STREAM HEALTH for selected PGM */}
-          <div className="card" style={{ padding: 12 }}>
-            <div style={{ fontSize: '.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 8 }}>Program Health</div>
-            {pgmDevice ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                {[
-                  { label: 'Resolution', value: pgmDevice.stream_resolution || '—', icon: '📐' },
-                  { label: 'FPS', value: (pgmDevice.stream_fps || 0) + ' fps', icon: '🎞️' },
-                  { label: 'Bitrate', value: (pgmDevice.stream_bitrate || 0) + ' kbps', icon: '📊' },
-                  { label: 'Battery', value: pgmDevice.battery_percent >= 0 ? pgmDevice.battery_percent + '%' : '—', icon: '🔋', color: pgmDevice.battery_percent < 20 ? 'var(--red)' : 'var(--green)' },
-                  { label: 'Signal', value: pgmDevice.signal_quality >= 0 ? pgmDevice.signal_quality + '%' : '—', icon: '📶' },
-                  { label: 'Network', value: pgmDevice.network_type || 'WiFi', icon: '🌐' },
-                ].map(m => (
-                  <div key={m.label} style={{ padding: '6px 8px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: '.6rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{m.icon} {m.label}</div>
-                    <div style={{ fontSize: '.85rem', fontWeight: 700, fontFamily: 'var(--mono)', color: m.color || 'var(--text-primary)', marginTop: 2 }}>{m.value}</div>
-                  </div>
-                ))}
+          <div className="vmix-monitor-video">
+            {pgmDevice?.is_online ? (
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ fontSize: '3rem' }}>📹</span>
+                <div style={{ fontWeight: 600, fontSize: '1rem', marginTop: 4 }}>{pgmDevice.name}</div>
               </div>
-            ) : <p style={{ fontSize: '.8rem', color: 'var(--text-muted)' }}>Select a PGM source</p>}
-          </div>
-
-          {/* PRODUCTION LOG */}
-          <div className="card" style={{ padding: 12, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: '.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>Production Log</div>
-            <div className="log-panel" style={{ flex: 1, maxHeight: 'none' }}>
-              {logs.length === 0 ? <p style={{ color: 'var(--text-muted)', fontSize: '.8rem' }}>No logs</p> : logs.slice(0, 20).map((log, i) => (
-                <div key={i} className="log-entry"><span className="log-time">{new Date(log.created_at).toLocaleTimeString()}</span><span className={`log-type ${log.type}`}>{log.type}</span><span className="log-msg">{log.message}</span></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ═══ BOTTOM SWITCHER BAR ═══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, padding: '10px 0', marginTop: 8, borderTop: '1px solid var(--border)' }}>
-
-        {/* PROGRAM BUS */}
-        <div>
-          <div style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Program</div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {devices.map((d, i) => (
-              <button key={d.id} onClick={() => selectPgm(d.id)} style={{ width: 44, height: 36, borderRadius: 6, border: pgm === d.id ? '2px solid var(--red)' : '1px solid var(--border)', background: pgm === d.id ? 'var(--red)' : 'var(--bg-card)', color: pgm === d.id ? '#fff' : 'var(--text-primary)', fontWeight: 800, fontSize: '.9rem', cursor: 'pointer', transition: 'all .1s' }}>{i+1}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* TRANSITION CONTROLS */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-          <div style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 1 }}>Transition</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={doCut} style={{ padding: '10px 24px', borderRadius: 6, border: '2px solid var(--red)', background: 'var(--red)', color: '#fff', fontWeight: 900, fontSize: '1rem', cursor: 'pointer', letterSpacing: 1, transition: 'all .1s' }} onMouseOver={e => e.target.style.boxShadow='0 0 20px rgba(255,61,113,.5)'} onMouseOut={e => e.target.style.boxShadow='none'}>CUT</button>
-            <button onClick={doFade} style={{ padding: '10px 20px', borderRadius: 6, border: '2px solid var(--orange)', background: 'var(--orange)', color: '#000', fontWeight: 900, fontSize: '1rem', cursor: 'pointer', letterSpacing: 1, transition: 'all .1s' }} onMouseOver={e => e.target.style.boxShadow='0 0 20px rgba(255,171,0,.5)'} onMouseOut={e => e.target.style.boxShadow='none'}>FADE</button>
-            <button onClick={doAutoTransition} style={{ padding: '10px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontWeight: 700, fontSize: '.85rem', cursor: 'pointer' }}>AUTO</button>
-          </div>
-          <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-            {!isLive ? (
-              <button className="btn btn-success btn-sm" onClick={goLive} style={{ fontWeight: 700 }}>🔴 GO LIVE</button>
-            ) : (
-              <button className="btn btn-danger btn-sm" onClick={goOff} style={{ fontWeight: 700 }}>⏹ END</button>
+            ) : <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PGM OFFLINE</span>}
+            {isLive && (
+              <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,.7)', padding: '4px 8px', borderRadius: 4, border: '1px solid #ef4444', color: '#ef4444', fontWeight: 700, fontSize: '.75rem', animation: 'pulse-badge 2s infinite' }}>
+                REC {fmtTime(elapsed)}
+              </div>
             )}
-            {vmixStatus && <>
-              <button className="btn btn-sm" onClick={() => doVmixAction(vmixStatus.recording ? 'stopRecording' : 'startRecording')} style={{ fontSize: '.75rem' }}>{vmixStatus.recording ? '⏹ REC' : '⏺ REC'}</button>
-              <button className="btn btn-sm" onClick={() => doVmixAction(vmixStatus.streaming ? 'stopStreaming' : 'startStreaming')} style={{ fontSize: '.75rem' }}>{vmixStatus.streaming ? '⏹ STR' : '📡 STR'}</button>
-            </>}
-          </div>
-        </div>
-
-        {/* PREVIEW BUS */}
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Preview</div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {devices.map((d, i) => (
-              <button key={d.id} onClick={() => selectPvw(d.id)} style={{ width: 44, height: 36, borderRadius: 6, border: pvw === d.id ? '2px solid var(--green)' : '1px solid var(--border)', background: pvw === d.id ? 'var(--green)' : 'var(--bg-card)', color: pvw === d.id ? '#000' : 'var(--text-primary)', fontWeight: 800, fontSize: '.9rem', cursor: 'pointer', transition: 'all .1s' }}>{i+1}</button>
-            ))}
           </div>
         </div>
       </div>
 
-      {/* FULLSCREEN OVERLAY */}
-      {fullscreen && (
-        <div className="modal-overlay" onClick={() => setFullscreen(null)} style={{ cursor: 'pointer' }}>
-          <div style={{ width: '90vw', aspectRatio: '16/9', background: '#000', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--accent)' }}>
-            <span style={{ fontSize: '4rem' }}>📹</span>
+      {/* 3. MIDDLE DIVIDER */}
+      <div className="vmix-divider">
+        <div style={{ display: 'flex', gap: 2, height: 16 }}>
+          {['#ef4444','#eab308','#22c55e','#3b82f6','#a855f7','#475569'].map(c => <div key={c} style={{ width: 16, background: c }}></div>)}
+          <div style={{ width: 16, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.6rem', color: '#fff', border: '1px solid #475569', marginLeft: 4 }}>🔍</div>
+        </div>
+        <button className="vmix-menu-btn" style={{ padding: '0 8px', height: 20, background: showAudioMixer?'#3b82f6':'#334155', borderRadius: 2 }} onClick={() => setShowAudioMixer(a => !a)}>🔊 Audio Mixer</button>
+      </div>
+
+      {/* 4. INPUTS GRID (Bottom Half) */}
+      <div className="vmix-inputs-area">
+        {devices.map((d, i) => (
+          <div key={d.id} className="vmix-input">
+            {/* Input Header */}
+            <div className={`vmix-input-header ${pgm === d.id ? 'pgm' : pvw === d.id ? 'pvw' : 'idle'}`} onClick={() => selectPvw(d.id)}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ background: 'rgba(0,0,0,.3)', padding: '0 4px', borderRadius: 2 }}>{i + 1}</span>
+                <span>{d.name}</span>
+              </div>
+              <span style={{ cursor: 'pointer', padding: '0 4px' }} onClick={(e) => { e.stopPropagation(); deleteInput(d.id); }}>✕</span>
+            </div>
+            
+            {/* Input Video */}
+            <div className="vmix-input-video" onClick={() => selectPvw(d.id)} onDoubleClick={() => selectPgm(d.id)}>
+              {d.is_online ? (
+                <video
+                  ref={el => { if (el) videoRefs.current[d.id] = el; }}
+                  autoPlay playsInline muted
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : <span style={{ color: '#475569', fontSize: '.8rem' }}>Offline</span>}
+            </div>
+            
+            {/* Input Footer */}
+            <div className="vmix-input-footer">
+              <button className="vmix-input-btn" onClick={() => selectPgm(d.id)}>GO</button>
+              <button className="vmix-input-btn" style={{ background: pgm === d.id ? '#ef4444' : '#334155' }} onClick={() => selectPgm(d.id)}>Cut</button>
+              <button className="vmix-input-btn" onClick={() => { selectPvw(d.id); setTimeout(doCut, transSpeed * 500); }}>Fade</button>
+              <button className="vmix-input-btn" style={{ marginLeft: 'auto' }} onClick={() => selectPvw(d.id)}>⚙️</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 5. BOTTOM STATUS BAR */}
+      <div className="vmix-bottom-bar">
+        <div className="vmix-bottom-controls">
+          <button className="vmix-action-btn" style={{ marginRight: 16 }} onClick={() => setShowAddInput(true)}>Add Input ▾</button>
+          <button className={`vmix-action-btn ${isRecording ? 'active' : ''}`} onClick={toggleRecord}>{isRecording ? `● REC ${fmtTime(recElapsed)}` : 'Record'}</button>
+          <button className="vmix-action-btn">External</button>
+          <button className={`vmix-action-btn ${isLive ? 'active' : ''}`} onClick={isLive ? goOff : goLive}>{isLive ? `● LIVE ${fmtTime(elapsed)}` : 'Stream ▾'}</button>
+          <button className="vmix-action-btn">MultiCorder</button>
+          <button className="vmix-action-btn">PlayList</button>
+          
+          <div style={{ flex: 1 }}></div>
+          <button className={`vmix-action-btn ${overlayActive ? 'active' : ''}`} onClick={() => setOverlayActive(o => !o)}>Overlay</button>
+          <div style={{ display: 'flex', gap: 2 }}>
+            <div style={{ width: 12, height: 12, background: '#eab308' }}></div>
+            <div style={{ width: 12, height: 12, background: '#22c55e' }}></div>
+            <div style={{ width: 12, height: 12, background: '#ef4444' }}></div>
+          </div>
+          <span style={{ fontSize: '.8rem' }}>🔒</span>
+        </div>
+        
+        <div className="vmix-bottom-stats">
+          <div className="vmix-stat-item" style={{ color: '#22c55e' }}>{pgmDevice?.stream_resolution || '1080p29.97'}</div>
+          <div className="vmix-stat-item">EX FPS: <span className="vmix-stat-val">{pgmDevice?.stream_fps || 30}</span></div>
+          <div className="vmix-stat-item">Render Time: <span className="vmix-stat-val">1 ms</span></div>
+          <div className="vmix-stat-item">GPU Mem: <span className="vmix-stat-val">2 %</span></div>
+          <div className="vmix-stat-item">CPU vMix: <span className="vmix-stat-val">1 %</span></div>
+          <div className="vmix-stat-item">Total: <span className="vmix-stat-val">33 %</span></div>
+        </div>
+      </div>
+
+      {/* FTB OVERLAY */}
+      {isFTB && <div style={{ position:'fixed',inset:0,background:'#000',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer' }} onClick={toggleFTB}><span style={{color:'#ef4444',fontSize:'2rem',fontWeight:900,animation:'pulse-badge 1s infinite'}}>FADE TO BLACK — Click to restore</span></div>}
+
+      {/* ADD INPUT MODAL */}
+      {showAddInput && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={() => setShowAddInput(false)}>
+          <div style={{background:'#1e293b',border:'1px solid #475569',borderRadius:8,padding:24,width:380}} onClick={e => e.stopPropagation()}>
+            <h3 style={{margin:'0 0 16px',color:'#f8fafc'}}>➕ Add Input</h3>
+            <div style={{marginBottom:12}}><label style={{fontSize:'.75rem',color:'#94a3b8',display:'block',marginBottom:4}}>Name</label><input style={{width:'100%',padding:'8px 12px',background:'#0f172a',border:'1px solid #334155',borderRadius:4,color:'#f8fafc',boxSizing:'border-box'}} value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} placeholder="Camera 1" /></div>
+            <div style={{marginBottom:12}}><label style={{fontSize:'.75rem',color:'#94a3b8',display:'block',marginBottom:4}}>Label</label><input style={{width:'100%',padding:'8px 12px',background:'#0f172a',border:'1px solid #334155',borderRadius:4,color:'#f8fafc',boxSizing:'border-box'}} value={addForm.label} onChange={e => setAddForm({...addForm, label: e.target.value})} placeholder="Main Hall" /></div>
+            <div style={{marginBottom:16}}><label style={{fontSize:'.75rem',color:'#94a3b8',display:'block',marginBottom:4}}>Group</label><input style={{width:'100%',padding:'8px 12px',background:'#0f172a',border:'1px solid #334155',borderRadius:4,color:'#f8fafc',boxSizing:'border-box'}} value={addForm.group_name} onChange={e => setAddForm({...addForm, group_name: e.target.value})} /></div>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}><button style={{padding:'8px 16px',background:'#334155',border:'none',borderRadius:4,color:'#fff',cursor:'pointer'}} onClick={() => setShowAddInput(false)}>Cancel</button><button style={{padding:'8px 16px',background:'#22c55e',border:'none',borderRadius:4,color:'#fff',fontWeight:700,cursor:'pointer'}} onClick={addInput}>Create</button></div>
           </div>
         </div>
       )}
+
+      {/* SETTINGS MODAL */}
+      {showSettings && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={() => setShowSettings(false)}>
+          <div style={{background:'#1e293b',border:'1px solid #475569',borderRadius:8,padding:24,width:420}} onClick={e => e.stopPropagation()}>
+            <h3 style={{margin:'0 0 16px',color:'#f8fafc'}}>⚙ Settings</h3>
+            <div style={{marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{color:'#cbd5e1',fontSize:'.85rem'}}>Transition Speed</span><span style={{color:'#3b82f6',fontWeight:700}}>{transSpeed}x ({transSpeed * 500}ms)</span></div>
+            <div style={{marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{color:'#cbd5e1',fontSize:'.85rem'}}>Total Inputs</span><span style={{color:'#22c55e',fontWeight:700}}>{devices.length}</span></div>
+            <div style={{marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{color:'#cbd5e1',fontSize:'.85rem'}}>Online</span><span style={{color:'#22c55e',fontWeight:700}}>{devices.filter(d=>d.is_online).length}</span></div>
+            <div style={{marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{color:'#cbd5e1',fontSize:'.85rem'}}>vMix Connections</span><span style={{color:'#eab308',fontWeight:700}}>{vmixConns.length}</span></div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}><button style={{padding:'8px 16px',background:'#334155',border:'none',borderRadius:4,color:'#fff',cursor:'pointer'}} onClick={() => setShowSettings(false)}>Close</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* AUDIO MIXER PANEL */}
+      {showAudioMixer && (
+        <div style={{position:'fixed',bottom:56,left:0,right:0,height:120,background:'#0f172a',borderTop:'2px solid #3b82f6',zIndex:50,padding:'12px 24px',display:'flex',gap:24,alignItems:'flex-end',overflow:'auto'}}>
+          <button style={{position:'absolute',top:4,right:12,background:'none',border:'none',color:'#94a3b8',fontSize:'1.2rem',cursor:'pointer'}} onClick={() => setShowAudioMixer(false)}>✕</button>
+          {devices.map((d,i) => (
+            <div key={d.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:50}}>
+              <div style={{width:8,height:80,background:'#1e293b',borderRadius:4,position:'relative'}}><div style={{position:'absolute',bottom:0,width:'100%',height:`${60+Math.random()*30}%`,background: pgm===d.id?'#ef4444':'#22c55e',borderRadius:4,transition:'height .3s'}}></div></div>
+              <span style={{fontSize:'.6rem',color:'#94a3b8',fontWeight:600}}>{i+1}</span>
+            </div>
+          ))}
+          <div style={{marginLeft:'auto',display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:50}}>
+            <div style={{width:8,height:80,background:'#1e293b',borderRadius:4,position:'relative'}}><div style={{position:'absolute',bottom:0,width:'100%',height:'75%',background:'#eab308',borderRadius:4}}></div></div>
+            <span style={{fontSize:'.6rem',color:'#94a3b8',fontWeight:600}}>Master</span>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

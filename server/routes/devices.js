@@ -70,9 +70,11 @@ router.get('/:id/qr', authenticate, async (req, res) => {
   try {
     const d = await helpers.getDeviceById(req.params.id);
     if (!d) return res.status(404).json({ error: 'Not found' });
-    const pairingData = JSON.stringify({ server: process.env.SERVER_URL || 'http://localhost:3001', token: d.pairing_token, device_id: d.id });
-    const qr = await QRCode.toDataURL(pairingData, { width: 400, margin: 2, color: { dark: '#00f0ff', light: '#0a0e1a' } });
-    res.json({ qr, pairing_token: d.pairing_token });
+    // Use SERVER_URL env var, or build from request host (works on LAN)
+    const baseUrl = process.env.SERVER_URL || `${req.protocol}://${req.hostname}:${process.env.PORT || 3001}`;
+    const cameraUrl = `${baseUrl}/camera?token=${d.pairing_token}`;
+    const qr = await QRCode.toDataURL(cameraUrl, { width: 400, margin: 2, color: { dark: '#00f0ff', light: '#0a0e1a' } });
+    res.json({ qr, pairing_token: d.pairing_token, camera_url: cameraUrl });
   } catch (err) { console.error('[DEVICES]', err); res.status(500).json({ error: 'QR failed' }); }
 });
 

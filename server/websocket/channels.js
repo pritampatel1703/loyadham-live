@@ -78,6 +78,41 @@ function setupWebSocketChannels(io) {
     socket.on('join-room', ({ roomId }) => { socket.join(roomId); socket.to(roomId).emit('peer-joined', { peerId: socket.id }); });
     socket.on('leave-room', ({ roomId }) => { socket.leave(roomId); socket.to(roomId).emit('peer-left', { peerId: socket.id }); });
   });
+
+  // Default namespace — for public viewer pages (Home, Watch)
+  const streamState = { active: false, title: '', viewerCount: 0, startedAt: null };
+  io.on('connection', (socket) => {
+    socket.emit('stream-state', streamState);
+
+    socket.on('viewer-join', ({ username }) => {
+      socket.data.username = username;
+      streamState.viewerCount = io.engine.clientsCount;
+      io.emit('viewer-count', streamState.viewerCount);
+    });
+
+    socket.on('start-stream', ({ title }) => {
+      streamState.active = true;
+      streamState.title = title || 'Loyadham Live';
+      streamState.startedAt = new Date().toISOString();
+      io.emit('stream-started', { title: streamState.title, startedAt: streamState.startedAt });
+    });
+
+    socket.on('stop-stream', () => {
+      streamState.active = false;
+      streamState.title = '';
+      streamState.startedAt = null;
+      io.emit('stream-ended');
+    });
+
+    socket.on('chat-message', (msg) => {
+      io.emit('chat-message', { ...msg, id: Date.now(), timestamp: new Date().toISOString() });
+    });
+
+    socket.on('disconnect', () => {
+      streamState.viewerCount = Math.max(0, io.engine.clientsCount - 1);
+      io.emit('viewer-count', streamState.viewerCount);
+    });
+  });
 }
 
 module.exports = { setupWebSocketChannels };

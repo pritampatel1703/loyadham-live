@@ -58,7 +58,7 @@ export default function DashboardLayout() {
       <div className="main-area">
         <header className="top-header">
           <div className="header-left">
-            <button className="btn btn-icon btn-ghost" onClick={() => setSidebarOpen(!sidebarOpen)} style={{ display: 'none' }} id="mobile-menu-btn">☰</button>
+            <button className="btn btn-icon btn-ghost" onClick={() => setSidebarOpen(!sidebarOpen)} id="mobile-menu-btn">☰</button>
             <span className="page-title">{NAV.find(n => n.path === location.pathname)?.label || 'Pixel Perfect'}</span>
           </div>
           <div className="header-right">
@@ -66,7 +66,7 @@ export default function DashboardLayout() {
             <div className="header-user" onClick={logout} title="Click to logout">
               <span>👤</span>
               <span>{user?.display_name || user?.username}</span>
-              <span className="badge badge-info">{user?.role?.replace('_', ' ')}</span>
+              <span className="badge badge-info">{user?.role?.replaceAll('_', ' ')}</span>
             </div>
           </div>
         </header>

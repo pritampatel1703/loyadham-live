@@ -3,3 +3,5 @@ const URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http:/
 export const productionSocket = io(`${URL}/production`, { autoConnect: false, transports: ['websocket','polling'] });
 export const deviceSocket = io(`${URL}/devices`, { autoConnect: false, transports: ['websocket','polling'] });
 export const signalingSocket = io(`${URL}/signaling`, { autoConnect: false, transports: ['websocket','polling'] });
+// General socket for public viewer pages (Home, Watch)
+export const socket = io(URL, { autoConnect: false, transports: ['websocket','polling'] });

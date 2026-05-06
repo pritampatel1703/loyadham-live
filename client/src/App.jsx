@@ -11,11 +11,11 @@ import Analytics from './pages/Analytics';
 import Streaming from './pages/Streaming';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
+import Camera from './pages/Camera';
+import Home from './pages/Home';
+import Watch from './pages/Watch';
 
 function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth();
-  if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',color:'var(--text-muted)'}}>⚡ Loading…</div>;
-  if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -26,6 +26,9 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/camera" element={<Camera />} />
+      <Route path="/home" element={<Home />} />
+      <Route path="/watch" element={<Watch />} />
       <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
