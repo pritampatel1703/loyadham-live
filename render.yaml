@@ -12,7 +12,4 @@ services:
         value: production
       - key: JWT_SECRET
         generateValue: true
-    disk:
-      name: pixel-perfect-data
-      mountPath: /opt/render/project/src/server/data
-      sizeGB: 1
+
