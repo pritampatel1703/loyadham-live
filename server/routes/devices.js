@@ -98,6 +98,13 @@ router.post('/:id/tally', authenticate, requireRole('operator'), async (req, res
   const { state } = req.body;
   if (!['off','preview','program'].includes(state)) return res.status(400).json({ error: 'Invalid state' });
   await helpers.updateTallyState(state, req.params.id);
+  
+  // Emit to production namespace so ProgramOutput switches instantly
+  const io = req.app.get('io');
+  if (io) {
+    io.of('/production').emit('device:tally', { deviceId: req.params.id, state });
+  }
+  
   res.json({ success: true });
 });
 

@@ -15,6 +15,7 @@ import Camera from './pages/Camera';
 import Home from './pages/Home';
 import Watch from './pages/Watch';
 import Output from './pages/Output';
+import ProgramOutput from './pages/ProgramOutput';
 
 function ProtectedRoute({ children }) {
   return children;
@@ -30,6 +31,7 @@ function AppRoutes() {
       <Route path="/camera" element={<Camera />} />
       <Route path="/home" element={<Home />} />
       <Route path="/watch" element={<Watch />} />
+      <Route path="/output/pgm" element={<ProgramOutput />} />
       <Route path="/output/:id" element={<Output />} />
       <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />

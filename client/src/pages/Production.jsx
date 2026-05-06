@@ -200,6 +200,13 @@ export default function Production() {
     }
   };
 
+  const copyPgmLink = () => {
+    const url = `${window.location.origin}/output/pgm`;
+    navigator.clipboard.writeText(url).then(() => {
+      alert('vMix PGM Link Copied! Paste this URL into a vMix Web Browser Input.');
+    }).catch(() => alert('Failed to copy.'));
+  };
+
   const addInput = async () => {
     try { await devicesApi.create(addForm); setShowAddInput(false); setAddForm({ name: '', label: '', group_name: 'Default' }); load(); } catch (e) { alert(e.message); }
   };
@@ -248,7 +255,8 @@ export default function Production() {
           <button className="vmix-menu-btn">Save As</button>
           <button className="vmix-menu-btn">Last</button>
         </div>
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '8px' }}>
+          <button className="vmix-menu-btn" onClick={copyPgmLink} style={{ color: '#3b82f6' }}>🔗 Copy PGM Link for vMix</button>
           <button className="vmix-menu-btn" onClick={toggleFullscreen}>Fullscreen</button>
         </div>
         <div className="vmix-menu-group" style={{ borderRight: 'none', borderLeft: '1px solid #2d3748' }}>
