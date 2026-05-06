@@ -70,14 +70,16 @@ router.get('/:id/qr', authenticate, async (req, res) => {
   try {
     const d = await helpers.getDeviceById(req.params.id);
     if (!d) return res.status(404).json({ error: 'Not found' });
-    // SERVER_URL env var is the cleanest. Otherwise, in production use origin without port.
-    // Locally, include the port for LAN access.
+    // Build the public-facing base URL
     let baseUrl = process.env.SERVER_URL;
     if (!baseUrl) {
-      const proto = req.get('x-forwarded-proto') || req.protocol;
-      const host = req.get('x-forwarded-host') || req.get('host') || req.hostname;
+      const host = req.get('host') || req.hostname;
+      // Render (and most PaaS) terminate SSL at the proxy — always use https in production
+      const proto = process.env.NODE_ENV === 'production' ? 'https' : (req.get('x-forwarded-proto') || req.protocol);
       baseUrl = `${proto}://${host}`;
     }
+    // Strip any trailing slash
+    baseUrl = baseUrl.replace(/\/+$/, '');
     const cameraUrl = `${baseUrl}/camera?token=${d.pairing_token}`;
     const qr = await QRCode.toDataURL(cameraUrl, { width: 400, margin: 2, color: { dark: '#00f0ff', light: '#0a0e1a' } });
     res.json({ qr, pairing_token: d.pairing_token, camera_url: cameraUrl });
