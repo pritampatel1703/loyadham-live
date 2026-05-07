@@ -169,8 +169,8 @@ export default function Camera() {
       params.encodings[0].scaleResolutionDownBy = 1.0;   // Never downscale resolution
       params.encodings[0].networkPriority = 'high';
       params.encodings[0].priority = 'high';
-      // Drop framerate first, not resolution, when bandwidth is tight
-      params.degradationPreference = 'maintain-resolution';
+      // Never drop resolution OR framerate — send full quality always
+      params.degradationPreference = 'disabled';
       sender.setParameters(params).catch(() => {});
     } catch (e) { /* browser may not support all params */ }
   };
