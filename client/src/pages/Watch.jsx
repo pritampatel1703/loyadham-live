@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
 import Chat from '../components/Chat';
-import { ICE_SERVERS_RELAY } from '../webrtc';
+import { getIceConfig } from '../webrtc';
 
 export default function Watch() {
   const navigate = useNavigate();
@@ -18,8 +18,9 @@ export default function Watch() {
   const [showPrompt, setShowPrompt]   = useState(true);
 
   // ── WebRTC helpers ──────────────────────────────────────────────────────────
-  function createPeerConnection(adminSocketId) {
-    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
+  async function createPeerConnection(adminSocketId) {
+    const iceConfig = await getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     pcRef.current = pc;
 
     pc.ontrack = (e) => {

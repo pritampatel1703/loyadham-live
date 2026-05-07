@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { signalingSocket } from '../socket';
-import { ICE_SERVERS_RELAY } from '../webrtc';
+import { getIceConfig } from '../webrtc';
 
 export default function Output() {
   const { id } = useParams();
@@ -10,11 +10,12 @@ export default function Output() {
   const iceQueue = useRef([]);
   const [status, setStatus] = useState('Waiting for camera...');
 
-  const connectCamera = useCallback(() => {
+  const connectCamera = useCallback(async () => {
     if (pcRef.current) return;
     setStatus('Connecting to camera...');
 
-    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
+    const iceConfig = await getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     pcRef.current = pc;
 
     pc.ontrack = (e) => {

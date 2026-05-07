@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { ICE_SERVERS_RELAY } from '../webrtc';
+import { getIceConfig, ICE_SERVERS } from '../webrtc';
 
 const URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
@@ -159,8 +159,9 @@ export default function Camera() {
     return lines.join('\r\n');
   };
 
-  const createPeerConnection = useCallback((peerId) => {
-    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
+  const createPeerConnection = useCallback(async (peerId) => {
+    const iceConfig = await getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     peersRef.current.set(peerId, pc);
     
     if (streamRef.current) {

@@ -38,6 +38,7 @@ const { initDatabase } = require('./db/database');
   app.use('/api/events', require('./routes/events'));
   app.use('/api/vmix', require('./routes/vmix'));
   app.use('/api/analytics', require('./routes/analytics'));
+  app.use('/api/turn', require('./routes/turn'));
 
   const { setupWebSocketChannels } = require('./websocket/channels');
   setupWebSocketChannels(io);

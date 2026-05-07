@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { devicesApi, analyticsApi, streamsApi, vmixApi } from '../api/client';
 import { productionSocket, signalingSocket } from '../socket';
-import { ICE_SERVERS_RELAY } from '../webrtc';
+import { getIceConfig } from '../webrtc';
 
 export default function Production() {
   const [devices, setDevices] = useState([]);
@@ -72,7 +72,7 @@ export default function Production() {
   }, []);
 
   // ── WebRTC: Connect to each online device's camera stream ──
-  const connectToCamera = useCallback((deviceId) => {
+  const connectToCamera = useCallback(async (deviceId) => {
     const existing = peerConns.current[deviceId];
     if (existing) return; // already connected or pending
 
@@ -107,7 +107,8 @@ export default function Production() {
       try { old.close(); } catch(e) {}
     }
 
-    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
+    const iceConfig = await getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {

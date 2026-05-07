@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 import Chat from '../components/Chat';
-import { ICE_SERVERS_RELAY } from '../webrtc';
+import { getIceConfig } from '../webrtc';
 
 const ADMIN_PASSWORD = 'Muktmuni1925';
 
@@ -50,7 +50,8 @@ export default function Admin() {
 
   // ── WebRTC: create offer for a specific viewer ──────────────────────────────
   async function createOfferForViewer(viewerId) {
-    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
+    const iceConfig = await getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     peerConns.current.set(viewerId, pc);
 
     // Add all local tracks so viewer gets audio + video
