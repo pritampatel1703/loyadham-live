@@ -38,6 +38,7 @@ export default function ProgramOutput() {
   // 2. Connect to a specific camera (headless)
   const connectToCamera = useCallback(async (streamId) => {
     if (peerConns.current[streamId]) return;
+    peerConns.current[streamId] = 'pending';
 
     const iceConfig = await getIceConfig();
     const pc = new RTCPeerConnection(iceConfig);

@@ -11,7 +11,7 @@ export default function Output() {
   const [status, setStatus] = useState('Waiting for camera...');
 
   const connectCamera = useCallback(async () => {
-    if (pcRef.current) return;
+    if (pcRef.current) return pcRef.current;
     setStatus('Connecting to camera...');
 
     const iceConfig = await getIceConfig();
@@ -50,6 +50,7 @@ export default function Output() {
     };
 
     signalingSocket.emit('join-room', { roomId: `camera-${id}` });
+    return pc;
   }, [id]);
 
   const handleOffer = useCallback(async ({ fromId, sdp, streamId }) => {
@@ -57,8 +58,7 @@ export default function Output() {
 
     let pc = pcRef.current;
     if (!pc) {
-      connectCamera();
-      pc = pcRef.current;
+      pc = await connectCamera();
     }
 
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));

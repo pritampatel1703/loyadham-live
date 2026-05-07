@@ -223,7 +223,7 @@ export default function Camera() {
   // When a production viewer joins our room, send them an offer
   const handlePeerJoined = useCallback(async ({ peerId }) => {
     console.log('[Camera] Production viewer joined:', peerId);
-    const pc = createPeerConnection(peerId);
+    const pc = await createPeerConnection(peerId);
     const offer = await pc.createOffer();
     offer.sdp = forceHighBitrateSDP(offer.sdp);
     await pc.setLocalDescription(offer);

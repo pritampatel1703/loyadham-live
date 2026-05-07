@@ -52,7 +52,7 @@ export default function Watch() {
     if (pcRef.current) { pcRef.current.close(); }
     setConnStatus('connecting');
 
-    const pc = createPeerConnection(fromId);
+    const pc = await createPeerConnection(fromId);
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
     // Flush queued ICE candidates
