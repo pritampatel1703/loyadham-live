@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { ICE_SERVERS } from '../webrtc';
+import { ICE_SERVERS_RELAY } from '../webrtc';
 
 const URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
@@ -153,7 +153,7 @@ export default function Camera() {
   };
 
   const createPeerConnection = useCallback((peerId) => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
     peersRef.current.set(peerId, pc);
     
     if (streamRef.current) {
@@ -173,6 +173,7 @@ export default function Camera() {
 
     pc.onicecandidate = (e) => {
       if (e.candidate && sigSocketRef.current) {
+        console.log('[Camera] ICE candidate:', e.candidate.type, e.candidate.protocol, e.candidate.address);
         sigSocketRef.current.emit('ice-candidate', {
           targetId: peerId,
           candidate: e.candidate,
@@ -181,7 +182,16 @@ export default function Camera() {
       }
     };
 
+    pc.onicecandidateerror = (e) => {
+      console.warn('[Camera] ICE candidate error:', e.errorCode, e.errorText, e.url);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('[Camera] ICE state:', pc.iceConnectionState);
+    };
+
     pc.onconnectionstatechange = () => {
+      console.log('[Camera] Connection state:', pc.connectionState);
       if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
         pc.close();
         peersRef.current.delete(peerId);

@@ -1,31 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 import Chat from '../components/Chat';
+import { ICE_SERVERS_RELAY } from '../webrtc';
 
 const ADMIN_PASSWORD = 'Muktmuni1925';
-
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    // TURN relay servers — required for cross-network streaming
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
-};
 
 export default function Admin() {
   // ── Auth state ──────────────────────────────────────────────────────────────
@@ -72,7 +50,7 @@ export default function Admin() {
 
   // ── WebRTC: create offer for a specific viewer ──────────────────────────────
   async function createOfferForViewer(viewerId) {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
     peerConns.current.set(viewerId, pc);
 
     // Add all local tracks so viewer gets audio + video

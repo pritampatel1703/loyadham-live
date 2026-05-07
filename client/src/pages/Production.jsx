@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { devicesApi, analyticsApi, streamsApi, vmixApi } from '../api/client';
 import { productionSocket, signalingSocket } from '../socket';
-import { ICE_SERVERS } from '../webrtc';
+import { ICE_SERVERS_RELAY } from '../webrtc';
 
 export default function Production() {
   const [devices, setDevices] = useState([]);
@@ -96,7 +96,7 @@ export default function Production() {
       try { old.close(); } catch(e) {}
     }
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
@@ -108,8 +108,13 @@ export default function Production() {
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
+        console.log('[Production] ICE candidate:', e.candidate.type, e.candidate.protocol, e.candidate.address);
         signalingSocket.emit('ice-candidate', { targetId: fromId, candidate: e.candidate, streamId });
       }
+    };
+
+    pc.onicecandidateerror = (e) => {
+      console.warn('[Production] ICE candidate error:', e.errorCode, e.errorText, e.url);
     };
 
     pc.oniceconnectionstatechange = () => {

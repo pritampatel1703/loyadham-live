@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { signalingSocket } from '../socket';
-import { ICE_SERVERS } from '../webrtc';
+import { ICE_SERVERS_RELAY } from '../webrtc';
 
 export default function Output() {
   const { id } = useParams();
@@ -14,7 +14,7 @@ export default function Output() {
     if (pcRef.current) return;
     setStatus('Connecting to camera...');
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
     pcRef.current = pc;
 
     pc.ontrack = (e) => {

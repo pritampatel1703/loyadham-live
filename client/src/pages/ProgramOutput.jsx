@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { signalingSocket, productionSocket } from '../socket';
-import { ICE_SERVERS } from '../webrtc';
+import { ICE_SERVERS_RELAY } from '../webrtc';
 import { devicesApi } from '../api/client';
 
 export default function ProgramOutput() {
@@ -38,7 +38,7 @@ export default function ProgramOutput() {
   const connectToCamera = useCallback((streamId) => {
     if (peerConns.current[streamId]) return;
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(ICE_SERVERS_RELAY);
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
