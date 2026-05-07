@@ -22,6 +22,8 @@ export default function Camera() {
   const [viewers, setViewers] = useState(0);
   const [streaming, setStreaming] = useState(false);
   const [tally, setTally] = useState('off');
+  const [detectedBrand, setDetectedBrand] = useState(null); // 'dji' | 'gopro' | 'capture_card' | null
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
   
   // Settings States
   const [showSettings, setShowSettings] = useState(false);
@@ -55,6 +57,21 @@ export default function Camera() {
     '2160p': { width: 3840, height: 2160 },
   };
 
+  // Detect external camera brand from device label
+  const detectCameraBrand = (label) => {
+    const l = label.toLowerCase();
+    if (l.includes('dji') || l.includes('uvc camera') || l.includes('pocket')) return 'dji';
+    if (l.includes('gopro')) return 'gopro';
+    if (l.includes('cam link') || l.includes('capture') || l.includes('elgato') || l.includes('avermedia') || l.includes('magewell')) return 'capture_card';
+    return null;
+  };
+
+  const brandInfo = {
+    dji: { name: 'DJI Pocket 3', icon: '🎬', color: '#00c3ff' },
+    gopro: { name: 'GoPro', icon: '📹', color: '#00bceb' },
+    capture_card: { name: 'Capture Card', icon: '🔌', color: '#a855f7' },
+  };
+
   // Enumerate cameras
   useEffect(() => {
     const getCams = async () => {
@@ -62,7 +79,18 @@ export default function Camera() {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevs = devices.filter(d => d.kind === 'videoinput');
         setCameras(videoDevs);
-        if (videoDevs.length > 0 && !selectedCameraId) {
+
+        // Auto-detect external cameras (DJI, GoPro, Capture Card)
+        const externalCam = videoDevs.find(d => detectCameraBrand(d.label));
+        if (externalCam) {
+          const brand = detectCameraBrand(externalCam.label);
+          setDetectedBrand(brand);
+          // Auto-select the external camera if nothing is selected yet
+          if (!selectedCameraId) {
+            setSelectedCameraId(externalCam.deviceId);
+          }
+        } else if (videoDevs.length > 0 && !selectedCameraId) {
+          setDetectedBrand(null);
           const back = videoDevs.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment'));
           setSelectedCameraId(back ? back.deviceId : videoDevs[0].deviceId);
         }
@@ -541,6 +569,11 @@ export default function Camera() {
         </div>
         {deviceName && <span style={styles.deviceLabel}>{deviceName}</span>}
         {streaming && <span style={{ ...styles.statusBadge, background: 'rgba(239,68,68,.6)', border: '1px solid rgba(239,68,68,.4)' }}>🔴 STREAMING · {viewers} viewer{viewers !== 1 ? 's' : ''}</span>}
+        {detectedBrand && brandInfo[detectedBrand] && (
+          <span style={{ ...styles.statusBadge, background: `${brandInfo[detectedBrand].color}33`, border: `1px solid ${brandInfo[detectedBrand].color}66`, color: brandInfo[detectedBrand].color }}>
+            {brandInfo[detectedBrand].icon} {brandInfo[detectedBrand].name}
+          </span>
+        )}
         
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
           {status === 'live' && <span style={styles.timer}>{fmtTime(elapsed)}</span>}
@@ -601,6 +634,11 @@ export default function Camera() {
         <button style={styles.controlBtn} onClick={() => setShowSettings(true)}>
           <span style={{ fontSize: '1.5rem' }}>⚙️</span>
           <span style={styles.controlLabel}>Settings</span>
+        </button>
+
+        <button style={{ ...styles.controlBtn, background: detectedBrand ? `${brandInfo[detectedBrand]?.color || '#3b82f6'}22` : 'rgba(255,255,255,.1)' }} onClick={() => setShowSetupGuide(true)}>
+          <span style={{ fontSize: '1.5rem' }}>📷</span>
+          <span style={styles.controlLabel}>Pro Cam</span>
         </button>
       </div>
       </div>
@@ -679,18 +717,109 @@ export default function Camera() {
               {cameras.length > 0 && (
                 <div style={styles.settingGroup}>
                   <div style={styles.settingLabel}>Camera lens</div>
-                  {cameras.map((cam, idx) => (
-                    <div key={cam.deviceId} style={styles.settingRow} onClick={() => setSelectedCameraId(cam.deviceId)}>
-                      <span>{cam.label || `Camera ${idx + 1}`}</span>
-                      {selectedCameraId === cam.deviceId && <span style={styles.checkIcon}>✓</span>}
-                    </div>
-                  ))}
+                  {cameras.map((cam, idx) => {
+                    const brand = detectCameraBrand(cam.label);
+                    const info = brand ? brandInfo[brand] : null;
+                    return (
+                      <div key={cam.deviceId} style={styles.settingRow} onClick={() => setSelectedCameraId(cam.deviceId)}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {cam.label || `Camera ${idx + 1}`}
+                          {info && <span style={{ fontSize: '.65rem', padding: '2px 8px', borderRadius: 10, background: `${info.color}22`, color: info.color, fontWeight: 700 }}>{info.icon} {info.name}</span>}
+                        </span>
+                        {selectedCameraId === cam.deviceId && <span style={styles.checkIcon}>✓</span>}
+                      </div>
+                    );
+                  })}
                   <div style={styles.settingRow} onClick={() => setSelectedCameraId('')}>
                     <span>Auto (Default)</span>
                     {!selectedCameraId && <span style={styles.checkIcon}>✓</span>}
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* External Camera Setup Guide */}
+      {showSetupGuide && (
+        <div style={styles.settingsOverlay} onClick={() => setShowSetupGuide(false)}>
+          <div style={{ ...styles.settingsModal, maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+            <div style={styles.settingsHeader}>
+              <button style={styles.backBtn} onClick={() => setShowSetupGuide(false)}>❮</button>
+              <h3 style={styles.settingsTitle}>External Camera Setup</h3>
+              <div style={{width: 32}}></div>
+            </div>
+
+            <div style={styles.settingsBody}>
+              {/* DJI Pocket 3 */}
+              <div style={styles.settingGroup}>
+                <div style={{ ...styles.settingLabel, color: '#00c3ff', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  🎬 DJI Pocket 3 (USB Webcam)
+                </div>
+                <div style={{ ...styles.settingRow, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontWeight: 600 }}>Steps:</span>
+                  <span style={{ fontSize: '.9rem', color: '#aaa', lineHeight: 1.6 }}>
+                    1. Connect DJI Pocket 3 to laptop via <b>USB-C</b> cable{'\n'}
+                    2. Power ON the camera{'\n'}
+                    3. On camera screen, select <b>"Webcam"</b> mode{'\n'}
+                    4. Open this Camera page on your <b>laptop browser</b>{'\n'}
+                    5. Go to Settings → Camera Lens → Select <b>"UVC Camera"</b>{'\n'}
+                    6. Stream starts automatically!
+                  </span>
+                  <span style={{ fontSize: '.75rem', color: '#666', marginTop: 4 }}>
+                    ✅ Face tracking works in webcam mode • Max 1080p
+                  </span>
+                </div>
+              </div>
+
+              {/* GoPro */}
+              <div style={styles.settingGroup}>
+                <div style={{ ...styles.settingLabel, color: '#00bceb', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  📹 GoPro Hero (USB Webcam)
+                </div>
+                <div style={{ ...styles.settingRow, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontWeight: 600 }}>Steps:</span>
+                  <span style={{ fontSize: '.9rem', color: '#aaa', lineHeight: 1.6 }}>
+                    1. Install <b>GoPro Webcam Utility</b> on your laptop{'\n'}
+                    2. Connect GoPro to laptop via <b>USB-C</b> cable{'\n'}
+                    3. Power ON the camera — it enters webcam mode automatically{'\n'}
+                    4. Check system tray for GoPro icon (confirms detection){'\n'}
+                    5. Open this Camera page on your <b>laptop browser</b>{'\n'}
+                    6. Go to Settings → Camera Lens → Select <b>"GoPro"</b>
+                  </span>
+                  <span style={{ fontSize: '.75rem', color: '#666', marginTop: 4 }}>
+                    ⚠️ Requires GoPro Webcam Desktop Utility • HERO8 Black and newer
+                  </span>
+                </div>
+              </div>
+
+              {/* HDMI Capture Card */}
+              <div style={styles.settingGroup}>
+                <div style={{ ...styles.settingLabel, color: '#a855f7', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  🔌 Any Camera via Capture Card
+                </div>
+                <div style={{ ...styles.settingRow, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontWeight: 600 }}>Steps:</span>
+                  <span style={{ fontSize: '.9rem', color: '#aaa', lineHeight: 1.6 }}>
+                    1. Connect camera's <b>HDMI output</b> to a capture card{'\n'}
+                    2. Plug capture card (Elgato/AVerMedia) into <b>laptop USB</b>{'\n'}
+                    3. Open this Camera page on your <b>laptop browser</b>{'\n'}
+                    4. Go to Settings → Camera Lens → Select the capture device{'\n'}
+                    5. Works with ANY camera that has HDMI output!
+                  </span>
+                  <span style={{ fontSize: '.75rem', color: '#666', marginTop: 4 }}>
+                    ✅ Best quality • No special software needed • Works with DSLRs, mirrorless, etc.
+                  </span>
+                </div>
+              </div>
+
+              {/* General tip */}
+              <div style={{ padding: '12px 16px', background: '#1a2332', borderRadius: 12, borderLeft: '3px solid #3b82f6' }}>
+                <span style={{ fontSize: '.85rem', color: '#94a3b8', lineHeight: 1.6 }}>
+                  <b style={{ color: '#3b82f6' }}>💡 Pro Tip:</b> Create a device in the <b>Devices</b> tab, scan the QR on the laptop where your camera is connected. The camera will auto-appear in the Production dashboard alongside your phone cameras.
+                </span>
+              </div>
             </div>
           </div>
         </div>
