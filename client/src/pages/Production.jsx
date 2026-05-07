@@ -39,6 +39,15 @@ export default function Production() {
   const remoteStreams = useRef({}); // deviceId -> MediaStream
   const [updateTrigger, setUpdateTrigger] = useState(0);
   const [isFading, setIsFading] = useState(false);
+  const [showAudioMixer, setShowAudioMixer] = useState(false);
+  const [overlayActive, setOverlayActive] = useState(false);
+
+  const demoCams = [
+    { id: 'd1', name: 'CAM 1 — Main Hall', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4500, battery_percent: 87, signal_quality: 92, tally_state: 'off' },
+    { id: 'd2', name: 'CAM 2 — Stage Left', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 3800, battery_percent: 64, signal_quality: 78, tally_state: 'off' },
+    { id: 'd3', name: 'CAM 3 — Wide Shot', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4200, battery_percent: 45, signal_quality: 85, tally_state: 'off' },
+    { id: 'd4', name: 'CAM 4 — Close Up', is_online: false, stream_resolution: '1280x720', stream_fps: 25, stream_bitrate: 2800, battery_percent: 23, signal_quality: 55, tally_state: 'off' },
+  ];
 
   const load = async () => {
     try {
@@ -221,12 +230,7 @@ export default function Production() {
     return () => clearInterval(id);
   }, [vmixActive]);
 
-  const demoCams = [
-    { id: 'd1', name: 'CAM 1 — Main Hall', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4500, battery_percent: 87, signal_quality: 92, tally_state: 'off' },
-    { id: 'd2', name: 'CAM 2 — Stage Left', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 3800, battery_percent: 64, signal_quality: 78, tally_state: 'off' },
-    { id: 'd3', name: 'CAM 3 — Wide Shot', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4200, battery_percent: 45, signal_quality: 85, tally_state: 'off' },
-    { id: 'd4', name: 'CAM 4 — Close Up', is_online: false, stream_resolution: '1280x720', stream_fps: 25, stream_bitrate: 2800, battery_percent: 23, signal_quality: 55, tally_state: 'off' },
-  ];
+  // demoCams defined at top of component (before load()) to avoid TDZ
 
   const selectPgm = (id) => { 
     setPgm(id); 
