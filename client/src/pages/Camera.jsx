@@ -118,11 +118,16 @@ export default function Camera() {
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints,
-        audio: true,
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       streamRef.current = stream;
       trackRef.current = stream.getVideoTracks()[0];
       if (videoRef.current) videoRef.current.srcObject = stream;
+
+      // Tell the encoder to prioritize sharpness over smoothness
+      if (trackRef.current.contentHint !== undefined) {
+        trackRef.current.contentHint = 'detail';
+      }
 
       // Check zoom capabilities
       const caps = trackRef.current.getCapabilities();
@@ -133,12 +138,15 @@ export default function Camera() {
         setZoomRange({ min: 1, max: 1, step: 0.1 });
       }
 
-      // Replace tracks on all existing peer connections
+      // Replace tracks on all existing peer connections AND reapply quality params
       peersRef.current.forEach((pc) => {
         const senders = pc.getSenders();
         stream.getTracks().forEach(track => {
           const sender = senders.find(s => s.track?.kind === track.kind);
-          if (sender) sender.replaceTrack(track);
+          if (sender) {
+            sender.replaceTrack(track);
+            if (track.kind === 'video') applyVideoEncoderParams(sender);
+          }
         });
       });
 
@@ -150,12 +158,28 @@ export default function Camera() {
     }
   };
 
-  // ── WebRTC: create offer and send to a production viewer ──
-  // Force 12 Mbps bitrate for absolute maximum video quality
+  // ── WebRTC Quality Tuning ──
+
+  // Apply high-quality encoder params to a video sender
+  const applyVideoEncoderParams = (sender) => {
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings) params.encodings = [{}];
+      params.encodings[0].maxBitrate = 8_000_000;       // 8 Mbps cap
+      params.encodings[0].scaleResolutionDownBy = 1.0;   // Never downscale resolution
+      params.encodings[0].networkPriority = 'high';
+      params.encodings[0].priority = 'high';
+      // Drop framerate first, not resolution, when bandwidth is tight
+      params.degradationPreference = 'maintain-resolution';
+      sender.setParameters(params).catch(() => {});
+    } catch (e) { /* browser may not support all params */ }
+  };
+
+  // Embed bandwidth hint in SDP (kbps)
   const forceHighBitrateSDP = (sdp) => {
     const lines = sdp.split('\r\n');
     const idx = lines.findIndex(l => l.startsWith('m=video'));
-    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:6000');
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:8000');
     return lines.join('\r\n');
   };
 
@@ -167,15 +191,7 @@ export default function Camera() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => {
         const sender = pc.addTrack(track, streamRef.current);
-        if (track.kind === 'video') {
-          try {
-            const params = sender.getParameters();
-            if (!params.encodings) params.encodings = [{}];
-            params.encodings[0].maxBitrate = 6000000;
-            params.encodings[0].networkPriority = 'high';
-            sender.setParameters(params).catch(()=>{});
-          } catch (e) { /* ignore if browser doesn't support */ }
-        }
+        if (track.kind === 'video') applyVideoEncoderParams(sender);
       });
     }
 
