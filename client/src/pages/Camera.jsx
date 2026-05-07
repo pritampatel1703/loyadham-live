@@ -29,6 +29,7 @@ export default function Camera() {
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [orientation, setOrientation] = useState('landscape');
   const [stabilization, setStabilization] = useState('auto');
+  const [blur, setBlur] = useState(false);
   
   // Fullscreen & Zoom
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -101,6 +102,10 @@ export default function Camera() {
       // Note: Not all browsers support this constraint yet, but passing it is safe
       if (stabilization !== 'off') {
         videoConstraints.videoStabilizationMode = { ideal: stabilization };
+      }
+      
+      if (blur) {
+        videoConstraints.backgroundBlur = true;
       }
 
       if (selectedCameraId) {
@@ -265,7 +270,7 @@ export default function Camera() {
     if (status === 'live') {
       startCamera();
     }
-  }, [resolution, frameRate, selectedCameraId, facingMode, stabilization]);
+  }, [resolution, frameRate, selectedCameraId, facingMode, stabilization, blur]);
 
   // ── Toggle torch ──
   const toggleTorch = async () => {
@@ -590,6 +595,21 @@ export default function Camera() {
                 ))}
               </div>
 
+              {/* Background Blur */}
+              <div style={styles.settingGroup}>
+                <div style={styles.settingLabel}>Background Blur (If Supported)</div>
+                <div style={styles.settingRow} onClick={() => {
+                  setBlur(!blur);
+                  // Alert iOS users since iOS blocks this API
+                  if (!blur && /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                    alert('Note: Apple blocks this feature in browsers. To blur the background on an iPhone, open your Control Center and tap "Video Effects ➝ Portrait".');
+                  }
+                }}>
+                  <span>Portrait Mode (Blur)</span>
+                  {blur && <span style={styles.checkIcon}>✓</span>}
+                </div>
+              </div>
+
               {/* Camera Lens */}
               {cameras.length > 0 && (
                 <div style={styles.settingGroup}>
@@ -616,7 +636,7 @@ export default function Camera() {
 
 const styles = {
   container: { position: 'fixed', inset: 0, background: '#000', display: 'flex', flexDirection: 'column' },
-  video: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' },
+  video: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', backgroundColor: '#000' },
   topHud: { position: 'absolute', top: 0, left: 0, right: 0, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, background: 'linear-gradient(180deg, rgba(0,0,0,.7), transparent)', zIndex: 10, flexWrap: 'wrap' },
   statusBadge: { display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,.6)', padding: '4px 12px', borderRadius: 20, fontSize: '.75rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'system-ui, sans-serif', border: '1px solid rgba(255,255,255,.1)' },
   deviceLabel: { color: '#f8fafc', fontSize: '.85rem', fontWeight: 600, fontFamily: 'system-ui, sans-serif' },
