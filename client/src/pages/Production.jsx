@@ -212,8 +212,18 @@ export default function Production() {
     { id: 'd4', name: 'CAM 4 — Close Up', is_online: false, stream_resolution: '1280x720', stream_fps: 25, stream_bitrate: 2800, battery_percent: 23, signal_quality: 55, tally_state: 'off' },
   ];
 
-  const selectPgm = (id) => { setPgm(id); devicesApi.setTally(id, 'program').catch(() => {}); if (pgm && pgm !== id) devicesApi.setTally(pgm, pvw === pgm ? 'preview' : 'off').catch(() => {}); };
-  const selectPvw = (id) => { setPvw(id); devicesApi.setTally(id, 'preview').catch(() => {}); if (pvw && pvw !== id) devicesApi.setTally(pvw, pgm === pvw ? 'program' : 'off').catch(() => {}); };
+  const selectPgm = (id) => { 
+    setPgm(id); 
+    productionSocket.emit('tally-update', { pgmId: id, pvwId: pvw });
+    devicesApi.setTally(id, 'program').catch(() => {}); 
+    if (pgm && pgm !== id) devicesApi.setTally(pgm, pvw === pgm ? 'preview' : 'off').catch(() => {}); 
+  };
+  const selectPvw = (id) => { 
+    setPvw(id); 
+    productionSocket.emit('tally-update', { pgmId: pgm, pvwId: id });
+    devicesApi.setTally(id, 'preview').catch(() => {}); 
+    if (pvw && pvw !== id) devicesApi.setTally(pvw, pgm === pvw ? 'program' : 'off').catch(() => {}); 
+  };
 
   const doCut = () => { if (pvw) { const old = pgm; selectPgm(pvw); if (old) selectPvw(old); } };
   const doFade = () => {

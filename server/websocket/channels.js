@@ -65,6 +65,10 @@ function setupWebSocketChannels(io) {
           socket.emit('logs:history', { logs: event_id ? await helpers.getLogsByEvent(event_id, limit||50) : await helpers.getRecentLogs(limit||50) });
         } catch (err) { console.error('[WS/log:subscribe] Error', err); }
       });
+      
+      socket.on('tally-update', ({ pgmId, pvwId }) => {
+        io.of('/devices').emit('tally-update', { pgmId, pvwId });
+      });
     } catch (err) {
       console.error('[WS/production:connection] Error', err);
     }

@@ -21,6 +21,7 @@ export default function Camera() {
   const [elapsed, setElapsed] = useState(0);
   const [viewers, setViewers] = useState(0);
   const [streaming, setStreaming] = useState(false);
+  const [tally, setTally] = useState('off');
   
   // Settings States
   const [showSettings, setShowSettings] = useState(false);
@@ -379,6 +380,12 @@ export default function Camera() {
       console.error('Device error:', message);
     });
 
+    devSock.on('tally-update', ({ pgmId, pvwId }) => {
+      if (pgmId === deviceIdRef.current) setTally('pgm');
+      else if (pvwId === deviceIdRef.current) setTally('pvw');
+      else setTally('off');
+    });
+
     devSock.on('disconnect', () => setStatus('disconnected'));
 
     // Signaling events
@@ -463,8 +470,17 @@ export default function Camera() {
     </div>
   );
 
+  const tallyBorder = tally === 'pgm' ? '6px solid #ef4444' : tally === 'pvw' ? '6px solid #22c55e' : 'none';
+
   return (
-    <div style={styles.container}>
+    <div style={{ ...styles.container, border: tallyBorder, boxSizing: 'border-box' }}>
+      {/* Tally Overlay Label */}
+      {tally !== 'off' && (
+        <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', background: tally === 'pgm' ? '#ef4444' : '#22c55e', color: '#fff', padding: '6px 20px', borderRadius: 8, fontWeight: 'bold', fontSize: '1.2rem', letterSpacing: 2, zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
+          {tally === 'pgm' ? 'LIVE' : 'PREVIEW'}
+        </div>
+      )}
+
       {/* Camera Feed */}
       <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
 
