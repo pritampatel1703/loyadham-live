@@ -69,6 +69,17 @@ function setupWebSocketChannels(io) {
       socket.on('tally-update', ({ pgmId, pvwId }) => {
         io.of('/devices').emit('tally-update', { pgmId, pvwId });
       });
+
+      socket.on('overlay-update', (overlay) => {
+        productionNs.emit('overlay-update', overlay);
+      });
+
+      socket.on('camera-cmd', ({ deviceId, cmd, payload }) => {
+        const targetSocketId = deviceSockets.get(deviceId);
+        if (targetSocketId) {
+          io.of('/devices').to(targetSocketId).emit('camera-cmd', { cmd, payload });
+        }
+      });
     } catch (err) {
       console.error('[WS/production:connection] Error', err);
     }

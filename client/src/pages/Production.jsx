@@ -21,8 +21,8 @@ export default function Production() {
   const [isFTB, setIsFTB] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showAudioMixer, setShowAudioMixer] = useState(false);
-  const [overlayActive, setOverlayActive] = useState(false);
+  const [showOverlayMixer, setShowOverlayMixer] = useState(false);
+  const [overlayData, setOverlayData] = useState({ active: false, title: 'Loyadham Live', subtitle: 'Global Broadcast' });
   const [transSpeed, setTransSpeed] = useState(1);
   const [talkbackOn, setTalkbackOn] = useState(false);
   const talkbackStreamRef = useRef(null);
@@ -32,11 +32,13 @@ export default function Production() {
   const videoRefs = useRef({});  // deviceId -> video element
   const pvwVideoRef = useRef(null);
   const pgmVideoRef = useRef(null);
+  const transitionVideoRef = useRef(null);
   const pgmContainerRef = useRef(null);
   const iceQueues = useRef({});
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
   const [updateTrigger, setUpdateTrigger] = useState(0);
+  const [isFading, setIsFading] = useState(false);
 
   const load = async () => {
     try {
@@ -63,6 +65,7 @@ export default function Production() {
     });
     productionSocket.on('device:online', load);
     productionSocket.on('device:offline', load);
+    productionSocket.on('overlay-update', setOverlayData);
     productionSocket.on('log:new', (log) => setLogs(prev => [log, ...prev].slice(0, 50)));
     const id = setInterval(load, 20000);
     return () => { clearInterval(id); productionSocket.disconnect(); };
@@ -240,14 +243,23 @@ export default function Production() {
   const doCut = () => { if (pvw) { const old = pgm; selectPgm(pvw); if (old) selectPvw(old); } };
   const doFade = () => {
     if (!pvw) return;
-    // Simulate a fade by delaying the cut
+    setIsFading(true);
+    if (transitionVideoRef.current && remoteStreams.current[pvw]) {
+      transitionVideoRef.current.srcObject = remoteStreams.current[pvw];
+      transitionVideoRef.current.play().catch(()=>{});
+    }
     const old = pgm;
-    setTimeout(() => { selectPgm(pvw); if (old) selectPvw(old); }, transSpeed * 500);
+    setTimeout(() => { selectPgm(pvw); if (old) selectPvw(old); setIsFading(false); }, transSpeed * 500);
   };
   const doAutoTransition = () => {
     if (!pvw) return;
+    setIsFading(true);
+    if (transitionVideoRef.current && remoteStreams.current[pvw]) {
+      transitionVideoRef.current.srcObject = remoteStreams.current[pvw];
+      transitionVideoRef.current.play().catch(()=>{});
+    }
     const old = pgm;
-    setTimeout(() => { selectPgm(pvw); if (old) selectPvw(old); }, transSpeed * 250);
+    setTimeout(() => { selectPgm(pvw); if (old) selectPvw(old); setIsFading(false); }, transSpeed * 250);
   };
 
   const doVmixAction = async (action, params) => {
@@ -278,6 +290,18 @@ export default function Production() {
     if (talkbackStreamRef.current) {
       talkbackStreamRef.current.getAudioTracks().forEach(t => t.enabled = next);
     }
+  };
+
+  const toggleOverlayGraphic = () => {
+    const next = { ...overlayData, active: !overlayData.active };
+    setOverlayData(next);
+    productionSocket.emit('overlay-update', next);
+  };
+  
+  const updateOverlayText = (field, value) => {
+    const next = { ...overlayData, [field]: value };
+    setOverlayData(next);
+    productionSocket.emit('overlay-update', next);
   };
 
   const copyPgmLink = () => {
@@ -470,7 +494,14 @@ export default function Production() {
               autoPlay 
               playsInline 
               muted 
-              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: pgmDevice?.is_online ? 'block' : 'none' }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: pgmDevice?.is_online ? 'block' : 'none' }}
+            />
+            <video 
+              ref={transitionVideoRef}
+              autoPlay 
+              playsInline 
+              muted 
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: isFading ? 1 : 0, transition: isFading ? `opacity ${transSpeed * 0.5}s ease` : 'none', pointerEvents: 'none', zIndex: 5 }}
             />
             {!pgmDevice?.is_online && (
               <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PGM OFFLINE</span>
@@ -480,6 +511,17 @@ export default function Production() {
                 REC {fmtTime(elapsed)}
               </div>
             )}
+            
+            {/* OVERLAY GRAPHIC (Lower Third) */}
+            <div style={{ position: 'absolute', bottom: '10%', left: '5%', transition: 'all 0.5s ease', opacity: overlayData.active ? 1 : 0, transform: overlayData.active ? 'translateY(0)' : 'translateY(20px)', zIndex: 50, pointerEvents: 'none' }}>
+              <div style={{ background: 'rgba(220, 38, 38, 0.95)', padding: '8px 24px', color: '#fff', fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: 2, borderLeft: '8px solid #fff', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+                {overlayData.title}
+              </div>
+              <div style={{ background: 'rgba(15, 23, 42, 0.95)', padding: '6px 24px', color: '#94a3b8', fontSize: '1.1rem', fontWeight: 600, display: 'inline-block', borderBottomRightRadius: 8, boxShadow: '0 5px 15px rgba(0,0,0,0.5)' }}>
+                {overlayData.subtitle}
+              </div>
+            </div>
+            
           </div>
         </div>
       </div>
@@ -489,9 +531,38 @@ export default function Production() {
         <div style={{ display: 'flex', gap: 2, height: 16 }}>
           {['#ef4444','#eab308','#22c55e','#3b82f6','#a855f7','#475569'].map(c => <div key={c} style={{ width: 16, background: c }}></div>)}
           <div style={{ width: 16, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.6rem', color: '#fff', border: '1px solid #475569', marginLeft: 4 }}>🔍</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="vmix-menu-btn" style={{ padding: '0 8px', height: 20, background: showOverlayMixer?'#3b82f6':'#334155', borderRadius: 2 }} onClick={() => setShowOverlayMixer(a => !a)}>🎨 Graphics</button>
+          <button className="vmix-menu-btn" style={{ padding: '0 8px', height: 20, background: showAudioMixer?'#3b82f6':'#334155', borderRadius: 2 }} onClick={() => setShowAudioMixer(a => !a)}>🔊 Audio Mixer</button>
         </div>
-        <button className="vmix-menu-btn" style={{ padding: '0 8px', height: 20, background: showAudioMixer?'#3b82f6':'#334155', borderRadius: 2 }} onClick={() => setShowAudioMixer(a => !a)}>🔊 Audio Mixer</button>
       </div>
+
+      {/* OVERLAYS MIXER PANEL */}
+      {showOverlayMixer && (
+        <div style={{ background: '#1e293b', borderBottom: '1px solid #0f1115', padding: '12px 16px', display: 'flex', gap: 16, alignItems: 'center' }}>
+          <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '.9rem' }}>LOWER THIRD</div>
+          <input 
+            type="text" 
+            value={overlayData.title} 
+            onChange={(e) => updateOverlayText('title', e.target.value)} 
+            placeholder="Main Title" 
+            style={{ background: '#0f1115', border: '1px solid #475569', color: '#fff', padding: '4px 8px', borderRadius: 4, width: 200 }} 
+          />
+          <input 
+            type="text" 
+            value={overlayData.subtitle} 
+            onChange={(e) => updateOverlayText('subtitle', e.target.value)} 
+            placeholder="Subtitle" 
+            style={{ background: '#0f1115', border: '1px solid #475569', color: '#fff', padding: '4px 8px', borderRadius: 4, width: 300 }} 
+          />
+          <button 
+            onClick={toggleOverlayGraphic}
+            style={{ background: overlayData.active ? '#ef4444' : '#22c55e', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 4, fontWeight: 'bold', cursor: 'pointer' }}
+          >
+            {overlayData.active ? 'HIDE GRAPHIC' : 'SHOW GRAPHIC'}
+          </button>
+        </div>
+      )}
 
       {/* 4. INPUTS GRID (Bottom Half) */}
       <div className="vmix-inputs-area">
@@ -516,6 +587,15 @@ export default function Production() {
                 />
               ) : <span style={{ color: '#475569', fontSize: '.8rem' }}>Offline</span>}
             </div>
+            
+            {/* Remote Controls */}
+            {d.is_online && (
+              <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#0f1115' }}>
+                <button className="vmix-input-btn" style={{ flex: 1, padding: '2px 0' }} onClick={() => productionSocket.emit('camera-cmd', { deviceId: d.id, cmd: 'flip' })} title="Flip Camera">🔄</button>
+                <button className="vmix-input-btn" style={{ flex: 1, padding: '2px 0' }} onClick={() => productionSocket.emit('camera-cmd', { deviceId: d.id, cmd: 'torch' })} title="Toggle Torch">🔦</button>
+                <button className="vmix-input-btn" style={{ flex: 1, padding: '2px 0' }} onClick={() => productionSocket.emit('camera-cmd', { deviceId: d.id, cmd: 'mute' })} title="Toggle Mute">🔇</button>
+              </div>
+            )}
             
             {/* Input Footer */}
             <div className="vmix-input-footer">

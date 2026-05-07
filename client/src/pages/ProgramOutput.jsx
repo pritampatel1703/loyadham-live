@@ -9,6 +9,7 @@ export default function ProgramOutput() {
   const [pgmId, setPgmId] = useState(null);
   const [devices, setDevices] = useState([]);
   const [status, setStatus] = useState('Waiting for Program feed...');
+  const [overlayData, setOverlayData] = useState({ active: false, title: '', subtitle: '' });
 
   const peerConns = useRef({});
   const videoRefs = useRef({});
@@ -129,6 +130,7 @@ export default function ProgramOutput() {
     });
     productionSocket.on('device:online', loadDevices);
     productionSocket.on('device:offline', loadDevices);
+    productionSocket.on('overlay-update', setOverlayData);
 
     loadDevices();
 
@@ -138,6 +140,7 @@ export default function ProgramOutput() {
       productionSocket.off('device:tally');
       productionSocket.off('device:online');
       productionSocket.off('device:offline');
+      productionSocket.off('overlay-update');
       Object.values(peerConns.current).forEach(pc => pc.close());
       peerConns.current = {};
     };
@@ -167,13 +170,22 @@ export default function ProgramOutput() {
               height: '100%',
               objectFit: 'contain',
               opacity: isPgm ? 1 : 0,
-              visibility: isPgm ? 'visible' : 'hidden',
-              transition: 'opacity 0.1s ease',
+              transition: 'opacity 0.5s ease',
               zIndex: isPgm ? 5 : 1
             }}
           />
         );
       })}
+
+      {/* OVERLAY GRAPHIC (Lower Third) */}
+      <div style={{ position: 'absolute', bottom: '10%', left: '5%', transition: 'all 0.5s ease', opacity: overlayData.active ? 1 : 0, transform: overlayData.active ? 'translateY(0)' : 'translateY(20px)', zIndex: 50, pointerEvents: 'none' }}>
+        <div style={{ background: 'rgba(220, 38, 38, 0.95)', padding: '12px 36px', color: '#fff', fontSize: '2.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: 2, borderLeft: '12px solid #fff', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+          {overlayData.title}
+        </div>
+        <div style={{ background: 'rgba(15, 23, 42, 0.95)', padding: '8px 36px', color: '#94a3b8', fontSize: '1.5rem', fontWeight: 600, display: 'inline-block', borderBottomRightRadius: 8, boxShadow: '0 5px 15px rgba(0,0,0,0.5)' }}>
+          {overlayData.subtitle}
+        </div>
+      </div>
     </div>
   );
 }

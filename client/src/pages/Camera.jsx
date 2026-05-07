@@ -290,8 +290,10 @@ export default function Camera() {
     try {
       const caps = trackRef.current.getCapabilities();
       if (caps.torch) {
-        await trackRef.current.applyConstraints({ advanced: [{ torch: !isTorch }] });
-        setIsTorch(t => !t);
+        setIsTorch(t => {
+          trackRef.current.applyConstraints({ advanced: [{ torch: !t }] }).catch(()=>{});
+          return !t;
+        });
       }
     } catch (e) { console.error('Torch error:', e); }
   };
@@ -318,7 +320,7 @@ export default function Camera() {
   const toggleFullscreen = async () => {
     try {
       const doc = document.documentElement;
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      if (!document.fullscreenElement) {
         if (doc.requestFullscreen) await doc.requestFullscreen();
         else if (doc.webkitRequestFullscreen) await doc.webkitRequestFullscreen();
         setIsFullscreen(true);
@@ -327,11 +329,29 @@ export default function Camera() {
         else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
         setIsFullscreen(false);
       }
-    } catch (e) { 
-      console.warn('Fullscreen failed:', e);
-      alert('Your browser does not support hiding the address bar (often true for iPhones). The app is already optimized to fill the screen!');
-    }
+    } catch (err) { console.warn('FS error:', err); }
   };
+
+  // ── Remote Commands Listener ──
+  useEffect(() => {
+    const devSock = deviceSocketRef.current;
+    if (!devSock) return;
+
+    const cmdHandler = ({ cmd }) => {
+      console.log('[Camera] Remote command:', cmd);
+      if (cmd === 'flip') {
+        setFacingMode(f => f === 'environment' ? 'user' : 'environment');
+        setSelectedCameraId('');
+      } else if (cmd === 'torch') {
+        toggleTorch();
+      } else if (cmd === 'mute') {
+        toggleMute();
+      }
+    };
+
+    devSock.on('camera-cmd', cmdHandler);
+    return () => devSock.off('camera-cmd', cmdHandler);
+  }, []);
 
   // ── Battery & Network info & Mobile setup ──
   useEffect(() => {
