@@ -814,10 +814,36 @@ export default function Camera() {
                 </div>
               </div>
 
+              {/* RTMP Wireless (Event Mode) */}
+              <div style={styles.settingGroup}>
+                <div style={{ ...styles.settingLabel, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  📡 Wireless RTMP (Event Mode — No Cables!)
+                </div>
+                <div style={{ ...styles.settingRow, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontWeight: 600 }}>For DJI Pocket 3:</span>
+                  <span style={{ fontSize: '.9rem', color: '#aaa', lineHeight: 1.6 }}>
+                    1. Connect DJI Pocket 3 to the <b>event Wi-Fi</b> via DJI Mimo app{'\n'}
+                    2. Open Mimo → Live Streaming → Select <b>RTMP</b>{'\n'}
+                    3. Enter RTMP URL: <b>rtmp://&lt;server-ip&gt;:1935/live/dji1</b>{'\n'}
+                    4. Tap Start — feed appears in Production dashboard!
+                  </span>
+                  <span style={{ fontWeight: 600, marginTop: 8 }}>For GoPro:</span>
+                  <span style={{ fontSize: '.9rem', color: '#aaa', lineHeight: 1.6 }}>
+                    1. Open GoPro Quik app → Go Live → Select <b>RTMP</b>{'\n'}
+                    2. Connect GoPro to event Wi-Fi or phone hotspot{'\n'}
+                    3. Enter RTMP URL: <b>rtmp://&lt;server-ip&gt;:1935/live/gopro1</b>{'\n'}
+                    4. Tap Go Live — feed appears in Production dashboard!
+                  </span>
+                  <span style={{ fontSize: '.75rem', color: '#666', marginTop: 4 }}>
+                    ⚡ Requires running the server locally with ENABLE_RTMP=true during events
+                  </span>
+                </div>
+              </div>
+
               {/* General tip */}
               <div style={{ padding: '12px 16px', background: '#1a2332', borderRadius: 12, borderLeft: '3px solid #3b82f6' }}>
                 <span style={{ fontSize: '.85rem', color: '#94a3b8', lineHeight: 1.6 }}>
-                  <b style={{ color: '#3b82f6' }}>💡 Pro Tip:</b> Create a device in the <b>Devices</b> tab, scan the QR on the laptop where your camera is connected. The camera will auto-appear in the Production dashboard alongside your phone cameras.
+                  <b style={{ color: '#3b82f6' }}>💡 Event Setup:</b> Run the server locally on the production laptop (<code>ENABLE_RTMP=true npm start</code>). Connect all cameras to the same Wi-Fi. DJI/GoPro push RTMP wirelessly → Production dashboard shows all feeds in real-time. No cables needed!
                 </span>
               </div>
             </div>

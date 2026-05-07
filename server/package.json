@@ -14,6 +14,7 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "node-fetch": "^2.7.0",
+    "node-media-server": "^4.2.4",
     "pg": "^8.20.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.7.4",

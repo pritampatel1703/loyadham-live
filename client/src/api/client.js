@@ -75,3 +75,8 @@ export const analyticsApi = {
   layouts: () => api('/api/analytics/layouts'),
   saveLayout: (d) => api('/api/analytics/layouts', { method: 'POST', body: JSON.stringify(d) }),
 };
+
+export const rtmpApi = {
+  status: () => api('/api/rtmp/status'),
+  streams: () => api('/api/rtmp/streams'),
+};

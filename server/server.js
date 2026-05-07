@@ -40,9 +40,17 @@ const { initDatabase } = require('./db/database');
   app.use('/api/vmix', require('./routes/vmix'));
   app.use('/api/analytics', require('./routes/analytics'));
   app.use('/api/turn', require('./routes/turn'));
+  app.use('/api/rtmp', require('./routes/rtmp'));
+
+  app.set('io', io);
 
   const { setupWebSocketChannels } = require('./websocket/channels');
   setupWebSocketChannels(io);
+
+  // Start RTMP ingest server (for DJI Pocket 3, GoPro, etc.)
+  // Only starts when ENABLE_RTMP=true is set
+  const { setupRtmpServer } = require('./rtmp/rtmpServer');
+  setupRtmpServer(io);
 
   // SPA fallback — serve index.html for client-side routing in production
   if (process.env.NODE_ENV === 'production') {

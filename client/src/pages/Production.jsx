@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { devicesApi, analyticsApi, streamsApi, vmixApi } from '../api/client';
+import { devicesApi, analyticsApi, streamsApi, vmixApi, rtmpApi } from '../api/client';
 import { productionSocket, signalingSocket } from '../socket';
 import { getIceConfig } from '../webrtc';
+import mpegts from 'mpegts.js';
 
 export default function Production() {
   const [devices, setDevices] = useState([]);
@@ -41,6 +42,9 @@ export default function Production() {
   const [isFading, setIsFading] = useState(false);
   const [showAudioMixer, setShowAudioMixer] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
+  const [rtmpStreams, setRtmpStreams] = useState([]);   // active RTMP streams
+  const [rtmpStatus, setRtmpStatus] = useState(null);   // RTMP server status
+  const rtmpPlayersRef = useRef({});  // streamKey -> mpegts.Player
 
   const demoCams = [
     { id: 'd1', name: 'CAM 1 — Main Hall', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4500, battery_percent: 87, signal_quality: 92, tally_state: 'off' },
@@ -76,6 +80,31 @@ export default function Production() {
     productionSocket.on('device:offline', load);
     productionSocket.on('overlay-update', setOverlayData);
     productionSocket.on('log:new', (log) => setLogs(prev => [log, ...prev].slice(0, 50)));
+
+    // RTMP stream events (DJI Pocket 3, GoPro, etc.)
+    productionSocket.on('rtmp:stream-start', (data) => {
+      setRtmpStreams(prev => {
+        if (prev.find(s => s.streamKey === data.streamKey)) return prev;
+        return [...prev, { streamKey: data.streamKey, streamPath: data.streamPath, flvUrl: data.flvUrl, startTime: Date.now() }];
+      });
+    });
+    productionSocket.on('rtmp:stream-end', (data) => {
+      setRtmpStreams(prev => prev.filter(s => s.streamKey !== data.streamKey));
+    });
+
+    // Fetch RTMP server status
+    rtmpApi.status().then(setRtmpStatus).catch(() => {});
+    rtmpApi.streams().then(r => {
+      if (r.streams?.length > 0) {
+        setRtmpStreams(r.streams.map(s => ({
+          streamKey: s.streamKey,
+          streamPath: s.streamPath,
+          flvUrl: `/rtmp-flv${s.streamPath}.flv`,
+          startTime: Date.now() - (s.uptime * 1000),
+        })));
+      }
+    }).catch(() => {});
+
     const id = setInterval(load, 20000);
     return () => { clearInterval(id); productionSocket.disconnect(); };
   }, []);
@@ -612,6 +641,58 @@ export default function Production() {
             </div>
           </div>
         ))}
+
+        {/* RTMP Stream Inputs (DJI Pocket 3, GoPro, etc.) */}
+        {rtmpStreams.map((stream) => (
+          <div
+            key={`rtmp-${stream.streamKey}`}
+            className="vmix-input-card"
+            style={{ border: '2px solid #00c3ff' }}
+          >
+            <div className="vmix-input-header" style={{ background: '#00c3ff22' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#00c3ff', boxShadow: '0 0 6px #00c3ff' }}></span>
+                <span>🎬 RTMP: {stream.streamKey}</span>
+              </div>
+            </div>
+            <div className="vmix-input-video" style={{ position: 'relative' }}>
+              <video
+                ref={el => {
+                  if (el && !rtmpPlayersRef.current[stream.streamKey]) {
+                    // Initialize mpegts.js player for this RTMP stream
+                    if (mpegts.isSupported()) {
+                      const flvUrl = rtmpStatus?.flvBaseUrl
+                        ? `${rtmpStatus.flvBaseUrl}/${stream.streamKey}.flv`
+                        : `http://localhost:8000/live/${stream.streamKey}.flv`;
+                      const player = mpegts.createPlayer({
+                        type: 'flv',
+                        isLive: true,
+                        url: flvUrl,
+                      }, {
+                        enableWorker: true,
+                        lazyLoadMaxDuration: 3,
+                        seekType: 'range',
+                        liveBufferLatencyChasing: true,
+                        liveBufferLatencyMaxLatency: 1.5,
+                        liveBufferLatencyMinRemain: 0.3,
+                      });
+                      player.attachMediaElement(el);
+                      player.load();
+                      player.play().catch(() => {});
+                      rtmpPlayersRef.current[stream.streamKey] = player;
+                    }
+                  }
+                }}
+                autoPlay playsInline muted
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+              <span style={{ position: 'absolute', top: 4, right: 4, background: '#00c3ff', color: '#000', fontSize: '.55rem', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>RTMP</span>
+            </div>
+            <div className="vmix-input-footer">
+              <span style={{ fontSize: '.65rem', color: '#94a3b8' }}>🎬 External Camera</span>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* 5. BOTTOM STATUS BAR */}
@@ -619,7 +700,9 @@ export default function Production() {
         <div className="vmix-bottom-controls">
           <button className="vmix-action-btn" style={{ marginRight: 16 }} onClick={() => setShowAddInput(true)}>Add Input ▾</button>
           <button className={`vmix-action-btn ${isRecording ? 'active' : ''}`} onClick={toggleRecord}>{isRecording ? `● REC ${fmtTime(recElapsed)}` : 'Record'}</button>
-          <button className="vmix-action-btn">External</button>
+          <button className="vmix-action-btn" style={rtmpStatus?.enabled ? { background: '#00c3ff22', color: '#00c3ff', border: '1px solid #00c3ff44' } : {}} title={rtmpStatus?.enabled ? `RTMP: ${rtmpStatus.rtmpUrl}` : 'RTMP disabled (set ENABLE_RTMP=true)'}>
+            {rtmpStatus?.enabled ? `🎬 RTMP (${rtmpStreams.length} stream${rtmpStreams.length !== 1 ? 's' : ''})` : 'External'}
+          </button>
           <button className={`vmix-action-btn ${isLive ? 'active' : ''}`} onClick={isLive ? goOff : goLive}>{isLive ? `● LIVE ${fmtTime(elapsed)}` : 'Stream ▾'}</button>
           <button className="vmix-action-btn">MultiCorder</button>
           <button className="vmix-action-btn">PlayList</button>
