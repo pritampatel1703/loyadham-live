@@ -6,27 +6,23 @@ const iceServerList = [
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
 
-  // Dedicated Metered TURN/STUN (bypasses restrictive symmetric NATs)
-  { urls: "stun:stun.relay.metered.ca:80" },
+  // Public Free OpenRelay TURN (Temporary workaround for exceeded quota)
+  // NOTE: For production reliability, upgrade your Metered.ca plan!
+  { urls: "stun:openrelay.metered.ca:80" },
   {
-    urls: "turn:global.relay.metered.ca:80",
-    username: "8cfe66e48e2624767802c667",
-    credential: "mFuP68l/r58qCLDf",
+    urls: "turn:openrelay.metered.ca:80",
+    username: "openrelayproject",
+    credential: "openrelayproject",
   },
   {
-    urls: "turn:global.relay.metered.ca:80?transport=tcp",
-    username: "8cfe66e48e2624767802c667",
-    credential: "mFuP68l/r58qCLDf",
+    urls: "turn:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject",
   },
   {
-    urls: "turn:global.relay.metered.ca:443",
-    username: "8cfe66e48e2624767802c667",
-    credential: "mFuP68l/r58qCLDf",
-  },
-  {
-    urls: "turns:global.relay.metered.ca:443?transport=tcp",
-    username: "8cfe66e48e2624767802c667",
-    credential: "mFuP68l/r58qCLDf",
+    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    username: "openrelayproject",
+    credential: "openrelayproject",
   },
 ];
 
