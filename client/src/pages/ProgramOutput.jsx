@@ -37,7 +37,7 @@ export default function ProgramOutput() {
 
   // 2. Connect to a specific camera (headless)
   const connectToCamera = useCallback(async (streamId) => {
-    if (peerConns.current[streamId]) return;
+    if (peerConns.current[streamId] && peerConns.current[streamId] !== 'pending') return peerConns.current[streamId];
     peerConns.current[streamId] = 'pending';
 
     const iceConfig = await getIceConfig();
@@ -71,14 +71,14 @@ export default function ProgramOutput() {
     };
 
     signalingSocket.emit('join-room', { roomId: `camera-${streamId}` });
+    return pc;
   }, []);
 
   // 3. Handle incoming WebRTC offers
   const handleOffer = useCallback(async ({ fromId, sdp, streamId }) => {
     let pc = peerConns.current[streamId];
-    if (!pc) {
-      connectToCamera(streamId);
-      pc = peerConns.current[streamId];
+    if (!pc || pc === 'pending') {
+      pc = await connectToCamera(streamId);
     }
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();

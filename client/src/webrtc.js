@@ -2,7 +2,7 @@
 // Fetches TURN credentials dynamically from the backend (Twilio NTS).
 // Falls back to free STUN-only if the backend is unreachable.
 
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Minimal STUN-only fallback (works on same network, no TURN)
 const FALLBACK_ICE = {
