@@ -532,6 +532,7 @@ export default function Production() {
         <div style={{ display: 'flex', gap: 2, height: 16 }}>
           {['#ef4444','#eab308','#22c55e','#3b82f6','#a855f7','#475569'].map(c => <div key={c} style={{ width: 16, background: c }}></div>)}
           <div style={{ width: 16, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.6rem', color: '#fff', border: '1px solid #475569', marginLeft: 4 }}>🔍</div>
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="vmix-menu-btn" style={{ padding: '0 8px', height: 20, background: showOverlayMixer?'#3b82f6':'#334155', borderRadius: 2 }} onClick={() => setShowOverlayMixer(a => !a)}>🎨 Graphics</button>
           <button className="vmix-menu-btn" style={{ padding: '0 8px', height: 20, background: showAudioMixer?'#3b82f6':'#334155', borderRadius: 2 }} onClick={() => setShowAudioMixer(a => !a)}>🔊 Audio Mixer</button>
