@@ -24,6 +24,8 @@ export default function Production() {
   const [showAudioMixer, setShowAudioMixer] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
   const [transSpeed, setTransSpeed] = useState(1);
+  const [talkbackOn, setTalkbackOn] = useState(false);
+  const talkbackStreamRef = useRef(null);
   const timerRef = useRef(null);
   const recTimerRef = useRef(null);
   const containerRef = useRef(null);
@@ -48,6 +50,12 @@ export default function Production() {
   };
 
   useEffect(() => {
+    // Grab mic for Talkback early so it's ready when cameras connect
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      stream.getAudioTracks().forEach(t => t.enabled = false); // Muted by default
+      talkbackStreamRef.current = stream;
+    }).catch(err => console.warn('Talkback mic access denied:', err));
+
     load();
     productionSocket.connect();
     productionSocket.on('device:heartbeat', (data) => {
@@ -138,6 +146,10 @@ export default function Production() {
     };
 
     try {
+      if (talkbackStreamRef.current) {
+        talkbackStreamRef.current.getTracks().forEach(t => pc.addTrack(t, talkbackStreamRef.current));
+      }
+      
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -260,6 +272,14 @@ export default function Production() {
     }
   };
 
+  const toggleTalkback = () => {
+    const next = !talkbackOn;
+    setTalkbackOn(next);
+    if (talkbackStreamRef.current) {
+      talkbackStreamRef.current.getAudioTracks().forEach(t => t.enabled = next);
+    }
+  };
+
   const copyPgmLink = () => {
     const token = localStorage.getItem('ag_token');
     const url = `${window.location.origin}/output/pgm?token=${token}`;
@@ -373,6 +393,13 @@ export default function Production() {
           <button className="vmix-menu-btn" onClick={toggleFullscreen}>Fullscreen</button>
         </div>
         <div className="vmix-menu-group" style={{ borderRight: 'none', borderLeft: '1px solid #2d3748' }}>
+          <button 
+            className="vmix-menu-btn" 
+            style={{ color: talkbackOn ? '#ef4444' : '#94a3b8', fontWeight: talkbackOn ? 'bold' : 'normal', borderRight: '1px solid #2d3748' }} 
+            onClick={toggleTalkback}
+          >
+            {talkbackOn ? '🎙️ TALKBACK ON' : '🎙️ Talkback Off'}
+          </button>
           <button className="vmix-menu-btn"  style={paused?{color:'#ef4444'}:{}} onClick={() => setPaused(p => !p)}>{paused ? '▶ Resume' : '⏸ Pause'}</button>
           <button className="vmix-menu-btn" onClick={() => setShowSettings(s => !s)}>⚙ Settings</button>
         </div>

@@ -38,6 +38,7 @@ export default function Camera() {
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
 
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
   const streamRef = useRef(null);
   const deviceSocketRef = useRef(null);
   const sigSocketRef = useRef(null);
@@ -176,6 +177,16 @@ export default function Camera() {
         }
       });
     }
+
+    pc.ontrack = (e) => {
+      if (e.track.kind === 'audio') {
+        console.log('[Camera] Received Talkback audio track');
+        if (audioRef.current) {
+          audioRef.current.srcObject = e.streams[0];
+          audioRef.current.play().catch(err => console.warn('Talkback playback failed:', err));
+        }
+      }
+    };
 
     pc.onicecandidate = (e) => {
       if (e.candidate && sigSocketRef.current) {
@@ -483,6 +494,7 @@ export default function Camera() {
 
       {/* Camera Feed */}
       <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
+      <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
 
       {/* Top HUD */}
       <div style={styles.topHud}>
