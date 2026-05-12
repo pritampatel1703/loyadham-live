@@ -12,9 +12,13 @@
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
   <script>
+    // === LOCAL RENDERLESS MODE ===
+    // Unregister any old stuck service workers that cause the chrome-error://chromewebdata/ crash
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW registration failed:', err));
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+          registration.unregister();
+        }
       });
     }
   </script>

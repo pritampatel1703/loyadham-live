@@ -25,22 +25,13 @@ function generateToken(user) {
 }
 
 /**
- * Middleware: Verify JWT token
+ * Middleware: Bypass authentication for Local Event Mode
  */
 function authenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
-  }
+  // === LOCAL RENDERLESS MODE ===
+  // Automatically authenticate every request as Super Admin
+  req.user = { id: 'local-admin', username: 'admin', role: 'super_admin' };
+  next();
 }
 
 /**

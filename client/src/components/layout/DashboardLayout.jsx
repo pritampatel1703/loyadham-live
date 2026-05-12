@@ -63,7 +63,7 @@ export default function DashboardLayout() {
           </div>
           <div className="header-right">
             <span className="header-clock">{clock}</span>
-            <div className="header-user" onClick={logout} title="Click to logout">
+            <div className="header-user">
               <span>👤</span>
               <span>{user?.display_name || user?.username}</span>
               <span className="badge badge-info">{user?.role?.replaceAll('_', ' ')}</span>

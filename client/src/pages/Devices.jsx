@@ -98,8 +98,15 @@ export default function Devices() {
             <h2 className="modal-title">📱 Scan to Pair</h2>
             <img src={qrData.qr} alt="QR Code" style={{ width: 280, borderRadius: 12, margin: '12px auto' }} />
             <p style={{ fontFamily: 'var(--mono)', color: 'var(--accent)', fontSize: '1.1rem', marginTop: 8 }}>{qrData.pairing_token}</p>
-            {qrData.camera_url && <p style={{ fontSize: '.75rem', color: 'var(--text-muted)', marginTop: 4, wordBreak: 'break-all' }}>{qrData.camera_url}</p>}
-            <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', marginTop: 8 }}>Scan this QR code with your phone camera to open the live camera feed</p>
+            {qrData.camera_url && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ fontSize: '.75rem', color: 'var(--text-muted)', marginBottom: 8, wordBreak: 'break-all' }}>{qrData.camera_url}</p>
+                <a href={qrData.camera_url} className="btn btn-primary" style={{ display: 'inline-block', padding: '10px 20px', textDecoration: 'none' }}>
+                  🎥 Open Camera on this Device
+                </a>
+              </div>
+            )}
+            <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', marginTop: 16 }}>Scan the QR code, or tap the button if you are already on your phone.</p>
             <div className="modal-actions" style={{justifyContent:'center'}}><button className="btn" onClick={() => setQrData(null)}>Close</button></div>
           </div>
         </div>

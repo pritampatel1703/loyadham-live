@@ -6,7 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/pixelperfect',
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 2000 // Fast fail if database is offline (Local Mode)
 });
 
 async function initDatabase() {
@@ -40,19 +41,69 @@ async function initDatabase() {
   }
 }
 
-// ═══ Query Helpers ═══
+// ═══ Query Helpers & In-Memory Fallback ═══
+// If PostgreSQL is not installed, the platform automatically switches to 'Offline Memory Mode'.
+let dbOffline = false;
+const memDB = {
+  users: [], devices: [], streams: [], events: [], vmix: [], logs: [], analytics: [], layouts: []
+};
+
+pool.on('error', () => { dbOffline = true; });
+
+async function checkDb() {
+  if (dbOffline) return false;
+  try { await pool.query('SELECT 1'); return true; } catch { dbOffline = true; return false; }
+}
+
 async function queryOne(sql, params = []) {
-  const { rows } = await pool.query(sql, params);
-  return rows[0] || null;
+  if (await checkDb()) {
+    try { const { rows } = await pool.query(sql, params); return rows[0] || null; } catch (e) {}
+  }
+  return mockDbQuery(sql, params, true);
 }
 
 async function queryAll(sql, params = []) {
-  const { rows } = await pool.query(sql, params);
-  return rows;
+  if (await checkDb()) {
+    try { const { rows } = await pool.query(sql, params); return rows; } catch (e) {}
+  }
+  return mockDbQuery(sql, params, false);
 }
 
 async function run(sql, params = []) {
-  return pool.query(sql, params);
+  if (await checkDb()) {
+    try { return await pool.query(sql, params); } catch (e) {}
+  }
+  mockDbRun(sql, params);
+  return { rowCount: 1 };
+}
+
+// ═══ Offline Mock Logic ═══
+function mockDbQuery(sql, params, isOne) {
+  let result = [];
+  if (sql.includes('FROM devices')) result = memDB.devices;
+  else if (sql.includes('FROM streams')) result = memDB.streams;
+  else if (sql.includes('FROM events')) result = memDB.events;
+  else if (sql.includes('FROM users')) result = memDB.users;
+  else if (sql.includes('COUNT')) return isOne ? { count: 0 } : [{ count: 0 }];
+  
+  if (sql.includes('WHERE id')) {
+    result = result.filter(r => r.id === params[0]);
+  } else if (sql.includes('WHERE pairing_token')) {
+    result = result.filter(r => r.pairing_token === params[0]);
+  }
+  
+  return isOne ? (result[0] || null) : result;
+}
+
+function mockDbRun(sql, params) {
+  if (sql.includes('INSERT INTO devices')) {
+    memDB.devices.push({ id: params[0], name: params[1], label: params[2], group_name: params[3], pairing_token: params[4], is_online: 0, battery_percent: 100, signal_quality: 100 });
+  } else if (sql.includes('UPDATE devices SET is_online')) {
+    const d = memDB.devices.find(x => x.id === params[9] || x.id === params[0]);
+    if (d) { d.is_online = params[0] === 1 ? 1 : 0; }
+  } else if (sql.includes('INSERT INTO events')) {
+    memDB.events.push({ id: params[0], title: params[1], description: params[2], status: params[3] });
+  }
 }
 
 // ═══ Prepared-style helpers ═══

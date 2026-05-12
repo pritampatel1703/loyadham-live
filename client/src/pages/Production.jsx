@@ -386,6 +386,8 @@ export default function Production() {
 
   const pgmDevice = devices.find(d => d.id === pgm);
   const pvwDevice = devices.find(d => d.id === pvw);
+  const pgmRtmpStream = rtmpStreams.find(s => `rtmp-${s.streamKey}` === pgm);
+  const pvwRtmpStream = rtmpStreams.find(s => `rtmp-${s.streamKey}` === pvw);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -411,27 +413,66 @@ export default function Production() {
   }, [devices, pgm, pvw]);
 
   // Sync monitors when pvw/pgm changes or a stream connects
+  // Helper: create mpegts player for a monitor video element
+  const attachRtmpToMonitor = useCallback((videoEl, streamKey, refKey) => {
+    if (!videoEl || !mpegts.isSupported()) return;
+    // Destroy old player if exists
+    if (rtmpPlayersRef.current[refKey]) {
+      try { rtmpPlayersRef.current[refKey].destroy(); } catch(e) {}
+      delete rtmpPlayersRef.current[refKey];
+    }
+    const flvUrl = `${window.location.protocol}//${window.location.host}/rtmp-flv/live/${streamKey}.flv`;
+    const player = mpegts.createPlayer({ type: 'flv', isLive: true, url: flvUrl }, {
+      enableWorker: true, 
+      liveBufferLatencyChasing: true, 
+      liveBufferLatencyMaxLatency: 3.0, // Relaxed to prevent stuttering
+      liveBufferLatencyMinRemain: 0.3,  // Maintain healthy buffer
+      autoCleanupSourceBuffer: true,
+    });
+    player.attachMediaElement(videoEl);
+    player.load();
+    player.play().catch(() => {});
+    rtmpPlayersRef.current[refKey] = player;
+  }, []);
+
+  const detachRtmpFromMonitor = useCallback((refKey) => {
+    if (rtmpPlayersRef.current[refKey]) {
+      try { rtmpPlayersRef.current[refKey].destroy(); } catch(e) {}
+      delete rtmpPlayersRef.current[refKey];
+    }
+  }, []);
+
   useEffect(() => {
     if (pvw && pvwVideoRef.current && remoteStreams.current[pvw]) {
+      detachRtmpFromMonitor('pvw-monitor');
       if (pvwVideoRef.current.srcObject !== remoteStreams.current[pvw]) {
         pvwVideoRef.current.srcObject = remoteStreams.current[pvw];
         pvwVideoRef.current.play().catch(()=>{});
       }
+    } else if (pvwRtmpStream && pvwVideoRef.current) {
+      pvwVideoRef.current.srcObject = null;
+      attachRtmpToMonitor(pvwVideoRef.current, pvwRtmpStream.streamKey, 'pvw-monitor');
     } else if (pvwVideoRef.current) {
+      detachRtmpFromMonitor('pvw-monitor');
       pvwVideoRef.current.srcObject = null;
     }
-  }, [pvw, updateTrigger]);
+  }, [pvw, updateTrigger, pvwRtmpStream]);
 
   useEffect(() => {
     if (pgm && pgmVideoRef.current && remoteStreams.current[pgm]) {
+      detachRtmpFromMonitor('pgm-monitor');
       if (pgmVideoRef.current.srcObject !== remoteStreams.current[pgm]) {
         pgmVideoRef.current.srcObject = remoteStreams.current[pgm];
         pgmVideoRef.current.play().catch(()=>{});
       }
+    } else if (pgmRtmpStream && pgmVideoRef.current) {
+      pgmVideoRef.current.srcObject = null;
+      attachRtmpToMonitor(pgmVideoRef.current, pgmRtmpStream.streamKey, 'pgm-monitor');
     } else if (pgmVideoRef.current) {
+      detachRtmpFromMonitor('pgm-monitor');
       pgmVideoRef.current.srcObject = null;
     }
-  }, [pgm, updateTrigger]);
+  }, [pgm, updateTrigger, pgmRtmpStream]);
 
   return (
     <div className="vmix-container" ref={containerRef}>
@@ -469,7 +510,7 @@ export default function Production() {
         <div className="vmix-monitor-container">
           <div className="vmix-monitor-header pvw">
             <span>PREVIEW</span>
-            <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pvwDevice?.name || 'Blank'}</span>
+            <span style={{ fontSize: '.7rem', opacity: 0.9 }}>{pvwRtmpStream ? `🎬 RTMP: ${pvwRtmpStream.streamKey}` : (pvwDevice?.name || 'Blank')}</span>
           </div>
           <div className="vmix-monitor-video">
             <video 
@@ -477,9 +518,9 @@ export default function Production() {
               autoPlay 
               playsInline 
               muted 
-              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: pvwDevice?.is_online ? 'block' : 'none' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: (pvwDevice?.is_online || pvwRtmpStream) ? 'block' : 'none' }}
             />
-            {!pvwDevice?.is_online && (
+            {!pvwDevice?.is_online && !pvwRtmpStream && (
               <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PVW OFFLINE</span>
             )}
           </div>
@@ -511,15 +552,24 @@ export default function Production() {
           <div className="vmix-monitor-header pgm" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <span>PROGRAM</span>
-              <span style={{ fontSize: '.7rem', opacity: 0.9, marginLeft: 8 }}>{pgmDevice?.name || 'Blank'}</span>
+              <span style={{ fontSize: '.7rem', opacity: 0.9, marginLeft: 8 }}>{pgmRtmpStream ? `🎬 RTMP: ${pgmRtmpStream.streamKey}` : (pgmDevice?.name || 'Blank')}</span>
             </div>
-            <button 
-              onClick={fullscreenPgm} 
-              style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
-              title="Fullscreen Program (can target secondary monitors)"
-            >
-              ⛶
-            </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button 
+                onClick={() => window.open('/output/pgm?token=' + localStorage.getItem('ag_token'), '_blank', 'width=1280,height=720')}
+                style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
+                title="Open in new window for extended monitors"
+              >
+                🪟
+              </button>
+              <button 
+                onClick={fullscreenPgm} 
+                style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
+                title="Fullscreen Program (can target secondary monitors)"
+              >
+                ⛶
+              </button>
+            </div>
           </div>
           <div className="vmix-monitor-video" ref={pgmContainerRef} style={{ position: 'relative' }}>
             <style dangerouslySetInnerHTML={{__html: `video::-webkit-media-controls { display: none !important; }`}} />
@@ -528,7 +578,7 @@ export default function Production() {
               autoPlay 
               playsInline 
               muted 
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: pgmDevice?.is_online ? 'block' : 'none' }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: (pgmDevice?.is_online || pgmRtmpStream) ? 'block' : 'none' }}
             />
             <video 
               ref={transitionVideoRef}
@@ -537,7 +587,7 @@ export default function Production() {
               muted 
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: isFading ? 1 : 0, transition: isFading ? `opacity ${transSpeed * 0.5}s ease` : 'none', pointerEvents: 'none', zIndex: 5 }}
             />
-            {!pgmDevice?.is_online && (
+            {!pgmDevice?.is_online && !pgmRtmpStream && (
               <span style={{ color: '#475569', fontSize: '1.2rem', fontWeight: 700 }}>PGM OFFLINE</span>
             )}
             {isLive && (
@@ -646,7 +696,7 @@ export default function Production() {
         {rtmpStreams.map((stream) => (
           <div
             key={`rtmp-${stream.streamKey}`}
-            className="vmix-input-card"
+            className="vmix-input"
             style={{ border: '2px solid #00c3ff' }}
           >
             <div className="vmix-input-header" style={{ background: '#00c3ff22' }}>
@@ -661,24 +711,39 @@ export default function Production() {
                   if (el && !rtmpPlayersRef.current[stream.streamKey]) {
                     // Initialize mpegts.js player for this RTMP stream
                     if (mpegts.isSupported()) {
-                      const flvUrl = rtmpStatus?.flvBaseUrl
-                        ? `${rtmpStatus.flvBaseUrl}/${stream.streamKey}.flv`
-                        : `http://localhost:8000/live/${stream.streamKey}.flv`;
+                      const flvUrl = `${window.location.protocol}//${window.location.host}/rtmp-flv/live/${stream.streamKey}.flv`;
+                      console.log('[RTMP] Initializing player for:', flvUrl);
+                      
                       const player = mpegts.createPlayer({
                         type: 'flv',
                         isLive: true,
                         url: flvUrl,
                       }, {
                         enableWorker: true,
-                        lazyLoadMaxDuration: 3,
+                        lazyLoadMaxDuration: 3, 
                         seekType: 'range',
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 1.5,
-                        liveBufferLatencyMinRemain: 0.3,
+                        liveBufferLatencyMaxLatency: 3.0, // Relaxed to prevent stuttering
+                        liveBufferLatencyMinRemain: 0.3,  // Maintain healthy buffer
+                        autoCleanupSourceBuffer: true,
                       });
+
+                      player.on(mpegts.Events.ERROR, (type, detail, info) => {
+                        console.error('[RTMP Player Error]', type, detail, info);
+                        // If it's a decode error, it's likely H.265 issue
+                        if (detail === mpegts.ErrorDetails.DECODE_ERROR) {
+                          alert('RTMP Error: Your camera might be using H.265. Please change it to H.264 in the DJI app settings!');
+                        }
+                      });
+
                       player.attachMediaElement(el);
                       player.load();
-                      player.play().catch(() => {});
+                      const playPromise = player.play();
+                      if (playPromise !== undefined) {
+                        playPromise.catch(error => {
+                          console.warn('[RTMP] Auto-play prevented, waiting for user interaction:', error);
+                        });
+                      }
                       rtmpPlayersRef.current[stream.streamKey] = player;
                     }
                   }
@@ -689,7 +754,10 @@ export default function Production() {
               <span style={{ position: 'absolute', top: 4, right: 4, background: '#00c3ff', color: '#000', fontSize: '.55rem', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>RTMP</span>
             </div>
             <div className="vmix-input-footer">
-              <span style={{ fontSize: '.65rem', color: '#94a3b8' }}>🎬 External Camera</span>
+              <button className="vmix-input-btn" onClick={() => selectPgm(`rtmp-${stream.streamKey}`)}>GO</button>
+              <button className="vmix-input-btn" style={{ background: pgm === `rtmp-${stream.streamKey}` ? '#ef4444' : '#334155' }} onClick={() => selectPgm(`rtmp-${stream.streamKey}`)}>Cut</button>
+              <button className="vmix-input-btn" onClick={() => { selectPvw(`rtmp-${stream.streamKey}`); setTimeout(doCut, transSpeed * 500); }}>Fade</button>
+              <button className="vmix-input-btn" style={{ marginLeft: 'auto' }} onClick={() => selectPvw(`rtmp-${stream.streamKey}`)}>⚙️</button>
             </div>
           </div>
         ))}

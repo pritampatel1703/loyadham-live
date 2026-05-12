@@ -17,6 +17,7 @@
     "node-media-server": "^4.2.4",
     "pg": "^8.20.0",
     "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
     "socket.io": "^4.7.4",
     "uuid": "^10.0.0"
   },

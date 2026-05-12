@@ -47,9 +47,9 @@ function setupRtmpServer(io) {
     rtmp: {
       port: rtmpPort,
       chunk_size: 60000,
-      gop_cache: true,
-      ping: 30,
-      ping_timeout: 60,
+      gop_cache: false, // Set to false for ultra-low latency (forces live edge)
+      ping: 10,         // Reduced ping
+      ping_timeout: 30, // Reduced timeout
     },
     http: {
       port: httpPort,
@@ -69,35 +69,50 @@ function setupRtmpServer(io) {
     console.log('[RTMP] Client connected:', id);
   });
 
-  nms.on('prePublish', (id, streamPath, args) => {
-    console.log('[RTMP] Stream starting:', streamPath);
-    // streamPath format: /live/streamKey
-    const parts = streamPath.split('/');
+  // Enhanced stream detection to handle different library versions/behaviors
+  const handleStreamStart = (id, streamPath, args) => {
+    // Some versions pass the session object as 'id', and it contains the path
+    const sessionPath = id && typeof id === 'object' ? id.streamPath : null;
+    const actualPath = streamPath || (args && args.streamPath) || sessionPath;
+    
+    if (!actualPath) {
+      // Still missing? This might be a connection event rather than a publish event
+      return;
+    }
+
+    console.log('[RTMP] ✅ Stream Registered:', actualPath);
+    const parts = actualPath.split('/');
     const streamKey = parts[parts.length - 1];
 
-    activeStreams.set(streamPath, {
-      id,
+    activeStreams.set(actualPath, {
+      id: (id && typeof id === 'object') ? id.id : id,
       streamKey,
       startTime: Date.now(),
       app: parts[1] || 'live',
     });
 
-    // Notify production dashboard
     if (io) {
       io.of('/production').emit('rtmp:stream-start', {
         streamKey,
-        streamPath,
-        flvUrl: `/rtmp-flv${streamPath}.flv`,
+        streamPath: actualPath,
+        flvUrl: `/rtmp-flv${actualPath}.flv`,
       });
     }
-  });
+  };
+
+  // Listen to both pre and post to be safe
+  nms.on('prePublish', handleStreamStart);
+  nms.on('postPublish', handleStreamStart);
 
   nms.on('donePublish', (id, streamPath, args) => {
-    console.log('[RTMP] Stream ended:', streamPath);
-    const parts = streamPath.split('/');
+    const actualPath = streamPath || (args && args.streamPath);
+    if (!actualPath) return;
+    
+    console.log('[RTMP] ⏹️ Stream Ended:', actualPath);
+    const parts = actualPath.split('/');
     const streamKey = parts[parts.length - 1];
 
-    activeStreams.delete(streamPath);
+    activeStreams.delete(actualPath);
 
     if (io) {
       io.of('/production').emit('rtmp:stream-end', { streamKey, streamPath });

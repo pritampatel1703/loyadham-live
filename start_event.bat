@@ -7,6 +7,11 @@ echo     LOYADHAM PIXEL PERFECT - LOCAL EVENT SERVER
 echo ===================================================
 echo.
 
+echo Cleaning up previous background processes...
+taskkill /F /IM node.exe >nul 2>&1
+taskkill /F /IM cloudflared.exe >nul 2>&1
+echo.
+
 echo [1/4] Building latest dashboard...
 pushd "%ROOT%client"
 call npm run build
@@ -28,28 +33,18 @@ if not exist "%ROOT%cloudflared.exe" (
 echo.
 echo [4/4] Starting Server and Public Tunnel...
 
-:: Start the server in a separate window using helper script
-start "Loyadham Server" "%ROOT%_run_server.bat" "%ROOT%server"
+:: Start the server in a separate window using the helper script
+:: We use 'call' to prevent Windows from stripping the quotes around %ROOT%
+start "Loyadham Server" call "%ROOT%_run_server.bat"
 
 :: Wait for the server to boot up safely
 ping 127.0.0.1 -n 4 >nul
 
+:: Launch the Node.js helper that prints IP, QR code, and handles Cloudflare
+pushd "%ROOT%server"
+node print_info.js
+popd
+
 echo.
-echo ===================================================
-echo   SERVER IS READY! (Keep BOTH windows open)
-echo.
-echo   1. DASHBOARD (Your Laptop):
-echo      http://localhost:4000
-echo.
-echo   2. DJI / GOPRO (Local Wi-Fi RTMP):
-echo      rtmp://YOUR-IP:1935/live/dji1
-echo.
-echo   3. MOBILE PHONES (4G/5G or Wi-Fi):
-echo      See the trycloudflare.com link below!
-echo ===================================================
-echo.
-echo Generating public link for mobile phones...
-echo (Press Ctrl+C to stop when the event is over)
-echo.
-"%ROOT%cloudflared.exe" tunnel --url http://localhost:4000
+echo Startup complete. If the server window did not open, read the errors above.
 pause

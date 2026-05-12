@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import DashboardLayout from './components/layout/DashboardLayout';
-import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Production from './pages/Production';
@@ -17,25 +16,18 @@ import Watch from './pages/Watch';
 import Output from './pages/Output';
 import ProgramOutput from './pages/ProgramOutput';
 
-function ProtectedRoute({ children }) {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  return children;
-}
-
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
   if (loading) return null;
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
       <Route path="/camera" element={<Camera />} />
       <Route path="/home" element={<Home />} />
       <Route path="/watch" element={<Watch />} />
       <Route path="/output/pgm" element={<ProgramOutput />} />
       <Route path="/output/:id" element={<Output />} />
-      <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+      <Route path="/" element={<DashboardLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="devices" element={<Devices />} />

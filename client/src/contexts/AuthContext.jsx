@@ -1,33 +1,15 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { authApi, getToken, setToken, clearToken } from '../api/client';
+import { createContext, useContext } from 'react';
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const token = getToken();
-    if (token) {
-      authApi.me().then(d => setUser(d.user)).catch(() => clearToken()).finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
-  }, []);
-
-  const login = async (username, password) => {
-    const data = await authApi.login(username, password);
-    setToken(data.token);
-    setUser(data.user);
-    return data;
-  };
-
-  const logout = () => { clearToken(); setUser(null); };
+  // === LOCAL RENDERLESS MODE ===
+  // We completely ripped out login. Everyone is always super_admin.
+  const user = { id: 'local-admin', username: 'admin', display_name: 'Broadcast Admin', role: 'super_admin', avatar: '' };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin: user?.role === 'super_admin' || user?.role === 'production_admin' }}>
+    <AuthContext.Provider value={{ user, loading: false, login: async () => {}, logout: () => {}, isAdmin: true }}>
       {children}
     </AuthContext.Provider>
   );

@@ -7,12 +7,28 @@ const path = require('path');
 
 const app = express();
 
+// === LOCAL RENDERLESS MODE ===
+// Prevent server from crashing and shutting down port 4000 if the offline database throws errors
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRASH PREVENTED] Unhandled Rejection:', reason.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[CRASH PREVENTED] Uncaught Exception:', err.message || err);
+});
+
 // CORS — allow all origins in dev, specific origins in prod
 const ALLOWED_ORIGINS = process.env.CLIENT_URL
   ? [process.env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000']
   : '*';
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json({ limit: '10mb' }));
+
+// === LOCAL RENDERLESS MODE ===
+// Force the browser to nuke any old Service Workers and Cache that causes chrome-error://chromewebdata
+app.use((req, res, next) => {
+  res.setHeader('Clear-Site-Data', '"cache", "storage", "executionContexts"');
+  next();
+});
 
 // Serve static client build in production
 if (process.env.NODE_ENV === 'production') {
@@ -44,6 +60,21 @@ const { initDatabase } = require('./db/database');
 
   app.set('io', io);
 
+  // RTMP-FLV Proxy — allows viewing RTMP streams through port 4000 (bypasses firewall/CORS issues)
+  app.get('/rtmp-flv/*', (req, res) => {
+    const streamPath = req.params[0]; // e.g. "live/dji1.flv"
+    const rtmpHttpPort = process.env.RTMP_HTTP_PORT || '8009';
+    const targetUrl = `http://127.0.0.1:${rtmpHttpPort}/${streamPath}`;
+    
+    const http = require('http');
+    http.get(targetUrl, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    }).on('error', (err) => {
+      res.status(500).send('RTMP Proxy Error: ' + err.message);
+    });
+  });
+
   const { setupWebSocketChannels } = require('./websocket/channels');
   setupWebSocketChannels(io);
 
@@ -58,9 +89,9 @@ const { initDatabase } = require('./db/database');
     app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, () => {
     console.log(`\n⚡ Pixel Perfect Broadcast Platform — Server running on port ${PORT}`);
-    console.log(`   Dashboard: http://localhost:5173`);
+    console.log(`   Dashboard: http://localhost:${PORT}`);
     console.log(`   API:       http://localhost:${PORT}/api\n`);
   });
 })();

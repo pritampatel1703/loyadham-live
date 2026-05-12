@@ -36,6 +36,7 @@ export default function Camera() {
   
   // Fullscreen & Zoom
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
 
@@ -561,6 +562,28 @@ export default function Camera() {
       <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
       <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
 
+      {/* Grid Overlay */}
+      {showGrid && (
+        <div style={{ 
+          position: 'absolute', 
+          top: '50%', 
+          left: '50%', 
+          transform: 'translate(-50%, -50%)',
+          width: '100%',
+          height: '100%',
+          maxWidth: orientation === 'landscape' ? '100%' : 'calc(100vh * (9/16))',
+          maxHeight: orientation === 'landscape' ? 'calc(100vw * (9/16))' : '100%',
+          aspectRatio: orientation === 'landscape' ? '16/9' : '9/16',
+          pointerEvents: 'none', 
+          zIndex: 5 
+        }}>
+          <div style={{ position: 'absolute', top: '33.33%', left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.2)', boxShadow: '0 0 1px rgba(0,0,0,0.5)' }}></div>
+          <div style={{ position: 'absolute', top: '66.66%', left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.2)', boxShadow: '0 0 1px rgba(0,0,0,0.5)' }}></div>
+          <div style={{ position: 'absolute', left: '33.33%', top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.2)', boxShadow: '0 0 1px rgba(0,0,0,0.5)' }}></div>
+          <div style={{ position: 'absolute', left: '66.66%', top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.2)', boxShadow: '0 0 1px rgba(0,0,0,0.5)' }}></div>
+        </div>
+      )}
+
       {/* Top HUD */}
       <div style={styles.topHud}>
         <div style={styles.statusBadge}>
@@ -614,6 +637,11 @@ export default function Camera() {
           <button style={styles.controlBtn} onClick={toggleFullscreen}>
             <span style={{ fontSize: '1.5rem' }}>{isFullscreen ? '↙️' : '⛶'}</span>
             <span style={styles.controlLabel}>{isFullscreen ? 'Exit FS' : 'Fullscreen'}</span>
+          </button>
+
+          <button style={styles.controlBtn} onClick={() => setShowGrid(!showGrid)}>
+            <span style={{ fontSize: '1.5rem' }}>{showGrid ? '▦' : '⧉'}</span>
+            <span style={styles.controlLabel}>{showGrid ? 'Hide Grid' : 'Show Grid'}</span>
           </button>
 
           <button style={{ ...styles.controlBtn, background: isMuted ? 'rgba(239,68,68,.2)' : 'rgba(255,255,255,.1)', borderColor: isMuted ? 'rgba(239,68,68,.5)' : 'rgba(255,255,255,.15)' }} onClick={toggleMute}>

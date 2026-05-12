@@ -73,10 +73,32 @@ router.get('/:id/qr', authenticate, async (req, res) => {
     // Build the public-facing base URL
     let baseUrl = process.env.SERVER_URL;
     if (!baseUrl) {
-      const host = req.get('host') || req.hostname;
-      // Render (and most PaaS) terminate SSL at the proxy — always use https in production
-      const proto = process.env.NODE_ENV === 'production' ? 'https' : (req.get('x-forwarded-proto') || req.protocol);
-      baseUrl = `${proto}://${host}`;
+      // 1. Try to read the active Cloudflare Tunnel URL first
+      try {
+        const cfUrlFile = require('path').join(__dirname, '..', 'cloudflare_url.txt');
+        if (require('fs').existsSync(cfUrlFile)) {
+          baseUrl = require('fs').readFileSync(cfUrlFile, 'utf8').trim();
+        }
+      } catch (e) {}
+
+      // 2. If no Cloudflare URL, fallback to LAN IP substitution
+      if (!baseUrl) {
+        let host = req.get('host') || req.hostname;
+        if (host.includes('localhost') || host.includes('127.0.0.1')) {
+          const os = require('os');
+          const interfaces = os.networkInterfaces();
+          for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+              if (iface.family === 'IPv4' && !iface.internal) {
+                host = host.replace(/localhost|127\.0\.0\.1/, iface.address);
+                break;
+              }
+            }
+          }
+        }
+        const proto = process.env.NODE_ENV === 'production' && !host.includes('192.168') && !host.includes('10.') ? 'https' : (req.get('x-forwarded-proto') || req.protocol);
+        baseUrl = `${proto}://${host}`;
+      }
     }
     // Strip any trailing slash
     baseUrl = baseUrl.replace(/\/+$/, '');
