@@ -34,6 +34,13 @@ async function initDatabase() {
         [uuidv4(), 'Default vMix', '127.0.0.1', 8088]);
     }
 
+    // Seed default ATEM connection
+    const atemCheck = await client.query("SELECT id FROM atem_connections LIMIT 1");
+    if (atemCheck.rows.length === 0) {
+      await client.query("INSERT INTO atem_connections (id, name, ip) VALUES ($1, $2, $3)",
+        [uuidv4(), 'Default ATEM Switcher', '192.168.1.50']);
+    }
+
     client.release();
     console.log('[DB] Database schema initialized');
   } catch (err) {
@@ -43,10 +50,32 @@ async function initDatabase() {
 
 // ═══ Query Helpers & In-Memory Fallback ═══
 // If PostgreSQL is not installed, the platform automatically switches to 'Offline Memory Mode'.
-let dbOffline = false;
+const backupPath = path.join(__dirname, 'mem_backup.json');
+let initialDevices = [];
+try {
+  if (fs.existsSync(backupPath)) {
+    const raw = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+    if (Array.isArray(raw.devices)) initialDevices = raw.devices;
+  }
+} catch (_) {}
+
 const memDB = {
-  users: [], devices: [], streams: [], events: [], vmix: [], logs: [], analytics: [], layouts: []
+  users: [{ id: 'admin-1', username: 'admin', password_hash: bcrypt.hashSync('PixelPerfect@2026', 10), display_name: 'Super Admin', role: 'super_admin' }],
+  devices: initialDevices,
+  streams: [],
+  events: [],
+  vmix: [{ id: 'vmix-1', name: 'Default vMix', host: '127.0.0.1', port: 8088, is_connected: 0, auto_reconnect: 1 }],
+  atem: [{ id: 'atem-1', name: 'Default ATEM Switcher', ip: '192.168.1.50', is_connected: 0, auto_reconnect: 1, model: '' }],
+  logs: [],
+  analytics: [],
+  layouts: []
 };
+
+function saveMemBackup() {
+  try {
+    fs.writeFileSync(backupPath, JSON.stringify({ devices: memDB.devices }, null, 2));
+  } catch (_) {}
+}
 
 pool.on('error', () => { dbOffline = true; });
 
@@ -84,6 +113,8 @@ function mockDbQuery(sql, params, isOne) {
   else if (sql.includes('FROM streams')) result = memDB.streams;
   else if (sql.includes('FROM events')) result = memDB.events;
   else if (sql.includes('FROM users')) result = memDB.users;
+  else if (sql.includes('FROM vmix_connections')) result = memDB.vmix;
+  else if (sql.includes('FROM atem_connections')) result = memDB.atem;
   else if (sql.includes('COUNT')) return isOne ? { count: 0 } : [{ count: 0 }];
   
   if (sql.includes('WHERE id')) {
@@ -98,11 +129,23 @@ function mockDbQuery(sql, params, isOne) {
 function mockDbRun(sql, params) {
   if (sql.includes('INSERT INTO devices')) {
     memDB.devices.push({ id: params[0], name: params[1], label: params[2], group_name: params[3], pairing_token: params[4], is_online: 0, battery_percent: 100, signal_quality: 100 });
+    saveMemBackup();
   } else if (sql.includes('UPDATE devices SET is_online')) {
     const d = memDB.devices.find(x => x.id === params[9] || x.id === params[0]);
     if (d) { d.is_online = params[0] === 1 ? 1 : 0; }
+    saveMemBackup();
   } else if (sql.includes('INSERT INTO events')) {
     memDB.events.push({ id: params[0], title: params[1], description: params[2], status: params[3] });
+  } else if (sql.includes('INSERT INTO atem_connections')) {
+    memDB.atem.push({ id: params[0], name: params[1], ip: params[2], is_connected: 0, auto_reconnect: 1, model: '' });
+  } else if (sql.includes('UPDATE atem_connections SET is_connected')) {
+    const a = memDB.atem.find(x => x.id === params[2]);
+    if (a) { a.is_connected = params[0]; a.model = params[1]; }
+  } else if (sql.includes('UPDATE atem_connections SET name')) {
+    const a = memDB.atem.find(x => x.id === params[3]);
+    if (a) { a.name = params[0]; a.ip = params[1]; a.auto_reconnect = params[2]; }
+  } else if (sql.includes('DELETE FROM atem_connections')) {
+    memDB.atem = memDB.atem.filter(a => a.id !== params[0]);
   }
 }
 
@@ -178,6 +221,15 @@ const helpers = {
   updateVmixStatus: (connected, id) => run("UPDATE vmix_connections SET is_connected=$1,last_connected=CURRENT_TIMESTAMP WHERE id=$2", [connected, id]),
   updateVmixError: (error, id) => run('UPDATE vmix_connections SET is_connected=0,last_error=$1 WHERE id=$2', [error, id]),
   deleteVmixConnection: (id) => run('DELETE FROM vmix_connections WHERE id=$1', [id]),
+
+  // Blackmagic ATEM
+  getAllAtemConnections: () => queryAll('SELECT * FROM atem_connections'),
+  getAtemById: (id) => queryOne('SELECT * FROM atem_connections WHERE id=$1', [id]),
+  createAtemConnection: (id, name, ip) => run('INSERT INTO atem_connections (id,name,ip) VALUES ($1,$2,$3)', [id, name, ip]),
+  updateAtemConnection: (name, ip, autoReconnect, id) => run('UPDATE atem_connections SET name=$1,ip=$2,auto_reconnect=$3 WHERE id=$4', [name, ip, autoReconnect, id]),
+  updateAtemStatus: (connected, model, id) => run("UPDATE atem_connections SET is_connected=$1,model=$2,last_connected=CURRENT_TIMESTAMP WHERE id=$3", [connected, model, id]),
+  updateAtemError: (error, id) => run('UPDATE atem_connections SET is_connected=0,last_error=$1 WHERE id=$2', [error, id]),
+  deleteAtemConnection: (id) => run('DELETE FROM atem_connections WHERE id=$1', [id]),
 
   // Production Logs
   getRecentLogs: (limit) => queryAll('SELECT * FROM production_logs ORDER BY created_at DESC LIMIT $1', [limit]),

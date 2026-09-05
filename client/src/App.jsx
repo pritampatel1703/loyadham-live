@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Production from './pages/Production';
 import VmixControl from './pages/VmixControl';
+import AtemControl from './pages/AtemControl';
 import Events from './pages/Events';
 import Analytics from './pages/Analytics';
 import Streaming from './pages/Streaming';
@@ -33,6 +34,7 @@ function AppRoutes() {
         <Route path="devices" element={<Devices />} />
         <Route path="production" element={<Production />} />
         <Route path="vmix" element={<VmixControl />} />
+        <Route path="atem" element={<AtemControl />} />
         <Route path="events" element={<Events />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="streaming" element={<Streaming />} />

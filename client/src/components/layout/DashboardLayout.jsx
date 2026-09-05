@@ -7,6 +7,7 @@ const NAV = [
   { path: '/devices', icon: '📹', label: 'Devices' },
   { path: '/production', icon: '🎬', label: 'Production' },
   { path: '/vmix', icon: '🎛️', label: 'vMix Control' },
+  { path: '/atem', icon: '🎚️', label: 'Blackmagic ATEM' },
   { path: '/events', icon: '📅', label: 'Events' },
   { path: '/analytics', icon: '📈', label: 'Analytics' },
   { path: '/streaming', icon: '📡', label: 'Streaming' },

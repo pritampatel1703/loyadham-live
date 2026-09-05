@@ -39,15 +39,46 @@ export default function Camera() {
   const [showGrid, setShowGrid] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
+  const [gyroSteady, setGyroSteady] = useState(false);
+
+  // Pro Manual Controls
+  const [showProControls, setShowProControls] = useState(false);
+  const [proCaps, setProCaps] = useState(null); // { iso, exposureCompensation, focusDistance, colorTemperature, exposureTime, brightness }
+  const [proValues, setProValues] = useState({
+    iso: null,
+    exposureCompensation: null,
+    focusDistance: null,
+    colorTemperature: null,
+    exposureTime: null,
+    brightness: null,
+  });
+  const [proModes, setProModes] = useState({
+    exposureMode: 'continuous',
+    focusMode: 'continuous',
+    whiteBalanceMode: 'continuous',
+  });
+  const [canvasProcessing, setCanvasProcessing] = useState(false);
+  const softFiltersRef = useRef({ brightness: 1, contrast: 1, saturate: 1, warmth: 0 });
+  const [softDisplay, setSoftDisplay] = useState({ brightness: 1, contrast: 1, saturate: 1, warmth: 0 });
 
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const streamRef = useRef(null);
+  const rawStreamRef = useRef(null);
+  const rawTrackRef = useRef(null);
+  const rawVideoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const renderLoopRef = useRef(null);
   const deviceSocketRef = useRef(null);
   const sigSocketRef = useRef(null);
   const heartbeatRef = useRef(null);
   const timerRef = useRef(null);
   const trackRef = useRef(null);
+  const zoomTimeoutRef = useRef(null);
+  const lastZoomTimeRef = useRef(0);
+  const gyroOffset = useRef({ x: 0, y: 0 });
+  const orientationData = useRef({ pitch: null, yaw: null });
+  const targetOrientation = useRef({ pitch: null, yaw: null });
   const peersRef = useRef(new Map()); // peerId -> RTCPeerConnection
   const iceQueuesRef = useRef(new Map()); // peerId -> RTCIceCandidateInit[]
 
@@ -117,9 +148,73 @@ export default function Camera() {
     }
   };
 
+  // ── Gyroscope UI Toggle ──
+  const enableGyroSteady = async () => {
+    if (gyroSteady) {
+      setGyroSteady(false);
+      return;
+    }
+    // Request permission for iOS
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm === 'granted') setGyroSteady(true);
+        else alert('Gyroscope permission denied. Please allow it in settings.');
+      } catch (e) { console.error('Gyro error', e); }
+    } else {
+      setGyroSteady(true); // Non-iOS or older
+    }
+  };
+
+  // ── Gyroscope Tracking ──
+  useEffect(() => {
+    if (!gyroSteady) return;
+
+    orientationData.current = { pitch: null, yaw: null };
+    targetOrientation.current = { pitch: null, yaw: null };
+    gyroOffset.current = { x: 0, y: 0 };
+
+    const handleOrientationEvent = (e) => {
+      if (e.beta === null || e.gamma === null) return;
+      
+      let pitch = e.beta;
+      let yaw = e.gamma;
+      
+      const angle = window.screen?.orientation?.angle || 0;
+      if (angle === 90) { pitch = -e.gamma; yaw = e.beta; } 
+      else if (angle === -90 || angle === 270) { pitch = e.gamma; yaw = -e.beta; }
+      else if (angle === 180) { pitch = -e.beta; yaw = -e.gamma; }
+
+      if (orientationData.current.pitch === null) {
+        orientationData.current = { pitch, yaw };
+        targetOrientation.current = { pitch, yaw };
+        return;
+      }
+
+      // Smooth follow (Low-pass filter for the "intended" direction)
+      targetOrientation.current.pitch += (pitch - targetOrientation.current.pitch) * 0.05;
+      targetOrientation.current.yaw += (yaw - targetOrientation.current.yaw) * 0.05;
+
+      const shakePitch = pitch - targetOrientation.current.pitch;
+      const shakeYaw = yaw - targetOrientation.current.yaw;
+
+      // 30 px per degree is an estimate at 1x. Scales up heavily when zoomed in!
+      const ppx = 30 * zoom;
+      
+      gyroOffset.current.y = shakePitch * ppx;
+      gyroOffset.current.x = shakeYaw * ppx;
+    };
+
+    window.addEventListener('deviceorientation', handleOrientationEvent);
+    return () => window.removeEventListener('deviceorientation', handleOrientationEvent);
+  }, [gyroSteady, zoom]);
+
   // ── Start camera ──
   const startCamera = async () => {
+    if (rawStreamRef.current) rawStreamRef.current.getTracks().forEach(t => t.stop());
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    if (renderLoopRef.current) cancelAnimationFrame(renderLoopRef.current);
+
     try {
       const r = resMap[resolution] || resMap['1080p'];
       
@@ -129,10 +224,8 @@ export default function Camera() {
         frameRate: { ideal: frameRate }
       };
 
-      // Add stabilization if supported/requested
-      // Note: Not all browsers support this constraint yet, but passing it is safe
       if (stabilization !== 'off') {
-        videoConstraints.videoStabilizationMode = { ideal: stabilization };
+        videoConstraints.videoStabilizationMode = { ideal: gyroSteady ? 'cinematic' : stabilization };
       }
       
       if (blur) {
@@ -145,32 +238,133 @@ export default function Camera() {
         videoConstraints.facingMode = facingMode;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const rawStream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints,
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      streamRef.current = stream;
-      trackRef.current = stream.getVideoTracks()[0];
-      if (videoRef.current) videoRef.current.srcObject = stream;
 
-      // Tell the encoder to prioritize sharpness over smoothness
-      if (trackRef.current.contentHint !== undefined) {
-        trackRef.current.contentHint = 'detail';
+      rawStreamRef.current = rawStream;
+      rawTrackRef.current = rawStream.getVideoTracks()[0];
+
+      if (rawTrackRef.current.contentHint !== undefined) {
+        rawTrackRef.current.contentHint = 'detail';
       }
 
-      // Check zoom capabilities
-      const caps = trackRef.current.getCapabilities();
+      // Check zoom capabilities on raw hardware track
+      const caps = rawTrackRef.current.getCapabilities();
       if (caps.zoom) {
-        setZoomRange({ min: caps.zoom.min || 1, max: caps.zoom.max || 5, step: caps.zoom.step || 0.1 });
-        setZoom(caps.zoom.min || 1);
+        setZoomRange({ min: caps.zoom.min || 1, max: caps.zoom.max || 5, step: 0.01 }); // Smooth step
       } else {
-        setZoomRange({ min: 1, max: 1, step: 0.1 });
+        setZoomRange({ min: 1, max: 1, step: 0.01 });
+      }
+
+      // Detect Pro Control capabilities
+      const detectedCaps = {};
+      const settings = rawTrackRef.current.getSettings();
+      const proProps = ['iso', 'exposureCompensation', 'focusDistance', 'colorTemperature', 'exposureTime', 'brightness'];
+      proProps.forEach(prop => {
+        if (caps[prop] && typeof caps[prop].min === 'number') {
+          detectedCaps[prop] = { min: caps[prop].min, max: caps[prop].max, step: caps[prop].step || 1 };
+        }
+      });
+      if (Object.keys(detectedCaps).length > 0) {
+        setProCaps(detectedCaps);
+        // Initialize proValues from current settings
+        const initVals = {};
+        proProps.forEach(prop => {
+          initVals[prop] = settings[prop] ?? detectedCaps[prop]?.min ?? null;
+        });
+        setProValues(prev => ({ ...prev, ...initVals }));
+        // Initialize modes
+        setProModes({
+          exposureMode: settings.exposureMode || 'continuous',
+          focusMode: settings.focusMode || 'continuous',
+          whiteBalanceMode: settings.whiteBalanceMode || 'continuous',
+        });
+      } else {
+        setProCaps(null);
+      }
+
+      let finalStream = rawStream;
+
+      if (gyroSteady || canvasProcessing) {
+        if (!rawVideoRef.current) {
+          rawVideoRef.current = document.createElement('video');
+          rawVideoRef.current.autoplay = true;
+          rawVideoRef.current.playsInline = true;
+          rawVideoRef.current.muted = true;
+        }
+        rawVideoRef.current.srcObject = rawStream;
+        await rawVideoRef.current.play().catch(e=>console.log(e));
+
+        if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
+        const canvas = canvasRef.current;
+        canvas.width = r.width;
+        canvas.height = r.height;
+        const ctx = canvas.getContext('2d');
+
+        const render = () => {
+          if (rawVideoRef.current.readyState >= 2) {
+             // Apply software filters via CSS filter string
+             const sf = softFiltersRef.current;
+             ctx.filter = `brightness(${sf.brightness}) contrast(${sf.contrast}) saturate(${sf.saturate})`;
+
+             ctx.fillStyle = '#000';
+             ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+             if (gyroSteady) {
+               // Scale up by 20% to create a moving margin for gyro
+               const scale = 1.2;
+               const w = canvas.width * scale;
+               const h = canvas.height * scale;
+               const ccx = canvas.width / 2;
+               const ccy = canvas.height / 2;
+               const marginX = canvas.width * ((scale - 1) / 2);
+               const marginY = canvas.height * ((scale - 1) / 2);
+               let offX = Math.max(-marginX, Math.min(marginX, gyroOffset.current.x));
+               let offY = Math.max(-marginY, Math.min(marginY, gyroOffset.current.y));
+               ctx.drawImage(rawVideoRef.current, ccx - w/2 - offX, ccy - h/2 - offY, w, h);
+             } else {
+               ctx.drawImage(rawVideoRef.current, 0, 0, canvas.width, canvas.height);
+             }
+
+             // Apply warmth/color temperature overlay
+             if (sf.warmth !== 0) {
+               ctx.filter = 'none';
+               ctx.globalCompositeOperation = 'soft-light';
+               const alpha = Math.abs(sf.warmth) * 0.45;
+               ctx.fillStyle = sf.warmth > 0 ? `rgba(255, 147, 41, ${alpha})` : `rgba(70, 130, 240, ${alpha})`;
+               ctx.fillRect(0, 0, canvas.width, canvas.height);
+               ctx.globalCompositeOperation = 'source-over';
+             }
+
+             ctx.filter = 'none';
+          }
+          renderLoopRef.current = requestAnimationFrame(render);
+        };
+        renderLoopRef.current = requestAnimationFrame(render);
+
+        const canvasStream = canvas.captureStream(frameRate);
+        const rawAudio = rawStream.getAudioTracks()[0];
+        if (rawAudio) canvasStream.addTrack(rawAudio);
+        
+        finalStream = canvasStream;
+      }
+
+      streamRef.current = finalStream;
+      trackRef.current = finalStream.getVideoTracks()[0]; // Video track sent to WebRTC
+      
+      if (videoRef.current) videoRef.current.srcObject = finalStream;
+
+      // Re-apply zoom to hardware track if zooming was active
+      if (zoom > 1) {
+        try { await rawTrackRef.current.applyConstraints({ advanced: [{ zoom }] }); } catch(e){}
       }
 
       // Replace tracks on all existing peer connections AND reapply quality params
       peersRef.current.forEach((pc) => {
         const senders = pc.getSenders();
-        stream.getTracks().forEach(track => {
+        finalStream.getTracks().forEach(track => {
           const sender = senders.find(s => s.track?.kind === track.kind);
           if (sender) {
             sender.replaceTrack(track);
@@ -179,7 +373,7 @@ export default function Camera() {
         });
       });
 
-      return stream;
+      return finalStream;
     } catch (err) {
       console.error('Camera error:', err);
       setStatus('camera-error');
@@ -328,16 +522,17 @@ export default function Camera() {
     if (status === 'live') {
       startCamera();
     }
-  }, [resolution, frameRate, selectedCameraId, facingMode, stabilization, blur]);
+  }, [resolution, frameRate, selectedCameraId, facingMode, stabilization, blur, gyroSteady, canvasProcessing]);
 
   // ── Toggle torch ──
   const toggleTorch = async () => {
-    if (!trackRef.current) return;
+    const targetTrack = rawTrackRef.current || trackRef.current;
+    if (!targetTrack) return;
     try {
-      const caps = trackRef.current.getCapabilities();
+      const caps = targetTrack.getCapabilities();
       if (caps.torch) {
         setIsTorch(t => {
-          trackRef.current.applyConstraints({ advanced: [{ torch: !t }] }).catch(()=>{});
+          targetTrack.applyConstraints({ advanced: [{ torch: !t }] }).catch(()=>{});
           return !t;
         });
       }
@@ -346,20 +541,102 @@ export default function Camera() {
 
   // ── Toggle mute ──
   const toggleMute = () => {
-    if (!streamRef.current) return;
-    streamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
+    const targetStream = rawStreamRef.current || streamRef.current;
+    if (!targetStream) return;
+    targetStream.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
     setIsMuted(m => !m);
   };
 
-  // ── Zoom Handler ──
+  // ── Zoom Handler (Smoothed & Throttled) ──
   const handleZoom = async (e) => {
     const val = parseFloat(e.target.value);
-    setZoom(val);
-    if (trackRef.current) {
-      try {
-        await trackRef.current.applyConstraints({ advanced: [{ zoom: val }] });
-      } catch (err) { console.warn('Zoom failed:', err); }
+    setZoom(val); // Instant UI update for smooth slider dragging
+
+    const targetTrack = rawTrackRef.current || trackRef.current;
+    if (targetTrack) {
+      const now = Date.now();
+      
+      // Throttle hardware API calls to max 20 times per second (every 50ms)
+      if (now - lastZoomTimeRef.current > 50) {
+        lastZoomTimeRef.current = now;
+        try {
+          await targetTrack.applyConstraints({ advanced: [{ zoom: val }] });
+        } catch (err) {}
+      } else {
+        // Guarantee the very last frame of zoom is applied when the user stops dragging
+        if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+        zoomTimeoutRef.current = setTimeout(async () => {
+          lastZoomTimeRef.current = Date.now();
+          try {
+            await targetTrack.applyConstraints({ advanced: [{ zoom: val }] });
+          } catch (err) {}
+        }, 50);
+      }
     }
+  };
+
+  // ── Pro Manual Control Handler ──
+  const applyProConstraint = async (setting, value) => {
+    const targetTrack = rawTrackRef.current || trackRef.current;
+    if (!targetTrack) return;
+
+    // Update local state immediately for smooth slider
+    setProValues(prev => ({ ...prev, [setting]: value }));
+
+    try {
+      // When user drags a manual slider, switch the corresponding mode to manual
+      const modeUpdates = {};
+      if (setting === 'iso' || setting === 'exposureCompensation' || setting === 'exposureTime') {
+        if (proModes.exposureMode !== 'manual') {
+          modeUpdates.exposureMode = 'manual';
+          setProModes(prev => ({ ...prev, exposureMode: 'manual' }));
+        }
+      }
+      if (setting === 'focusDistance') {
+        if (proModes.focusMode !== 'manual') {
+          modeUpdates.focusMode = 'manual';
+          setProModes(prev => ({ ...prev, focusMode: 'manual' }));
+        }
+      }
+      if (setting === 'colorTemperature') {
+        if (proModes.whiteBalanceMode !== 'manual') {
+          modeUpdates.whiteBalanceMode = 'manual';
+          setProModes(prev => ({ ...prev, whiteBalanceMode: 'manual' }));
+        }
+      }
+
+      await targetTrack.applyConstraints({ advanced: [{ ...modeUpdates, [setting]: value }] });
+    } catch (err) {
+      console.warn('Pro control error:', setting, err);
+    }
+  };
+
+  // ── Reset a pro mode back to Auto ──
+  const resetProModeToAuto = async (mode) => {
+    const targetTrack = rawTrackRef.current || trackRef.current;
+    if (!targetTrack) return;
+    try {
+      await targetTrack.applyConstraints({ advanced: [{ [mode]: 'continuous' }] });
+      setProModes(prev => ({ ...prev, [mode]: 'continuous' }));
+    } catch (err) {
+      console.warn('Pro auto reset error:', mode, err);
+    }
+  };
+
+  // ── Software Filter Handler (Canvas-based) ──
+  const handleSoftControl = (key, value) => {
+    softFiltersRef.current = { ...softFiltersRef.current, [key]: value };
+    setSoftDisplay(prev => ({ ...prev, [key]: value }));
+    // Activate canvas pipeline on first software adjustment
+    if (!canvasProcessing) {
+      setCanvasProcessing(true);
+    }
+  };
+
+  const resetSoftFilters = () => {
+    const defaults = { brightness: 1, contrast: 1, saturate: 1, warmth: 0 };
+    softFiltersRef.current = defaults;
+    setSoftDisplay(defaults);
   };
 
   // ── Fullscreen Toggle ──
@@ -397,7 +674,8 @@ export default function Camera() {
 
     devSock.on('camera-cmd', cmdHandler);
     return () => devSock.off('camera-cmd', cmdHandler);
-  }, []);
+  }, [deviceId]);
+
 
   // ── Battery & Network info & Mobile setup ──
   useEffect(() => {
@@ -466,7 +744,28 @@ export default function Camera() {
     devSock.on('disconnect', () => setStatus('disconnected'));
 
     // Signaling events
+    const onSigConnect = () => {
+      if (deviceIdRef.current) {
+        sigSock.emit('join-room', { roomId: `camera-${deviceIdRef.current}` });
+        console.log(`[Camera] Signaling connected and joined room: camera-${deviceIdRef.current}`);
+      }
+    };
+    sigSock.on('connect', onSigConnect);
+    if (sigSock.connected) onSigConnect();
+
     sigSock.on('peer-joined', handlePeerJoined);
+    sigSock.on('need-offer', ({ fromId }) => {
+      if (fromId) {
+        console.log('[Camera] need-offer received from:', fromId);
+        handlePeerJoined({ peerId: fromId });
+      }
+    });
+    sigSock.on('room-peers', ({ peers }) => {
+      if (Array.isArray(peers)) {
+        console.log('[Camera] room-peers received:', peers);
+        peers.forEach(peerId => handlePeerJoined({ peerId }));
+      }
+    });
     sigSock.on('answer', handleAnswer);
     sigSock.on('ice-candidate', handleIceCandidate);
     sigSock.on('peer-left', handlePeerLeft);
@@ -487,13 +786,24 @@ export default function Camera() {
     const sigSock = sigSocketRef.current;
     if (!sigSock || !deviceId) return;
     sigSock.off('peer-joined');
+    sigSock.off('need-offer');
+    sigSock.off('room-peers');
     sigSock.off('answer');
     sigSock.off('ice-candidate');
     sigSock.off('peer-left');
     sigSock.on('peer-joined', handlePeerJoined);
+    sigSock.on('need-offer', ({ fromId }) => {
+      if (fromId) handlePeerJoined({ peerId: fromId });
+    });
+    sigSock.on('room-peers', ({ peers }) => {
+      if (Array.isArray(peers)) peers.forEach(peerId => handlePeerJoined({ peerId }));
+    });
     sigSock.on('answer', handleAnswer);
     sigSock.on('ice-candidate', handleIceCandidate);
     sigSock.on('peer-left', handlePeerLeft);
+    if (sigSock.connected) {
+      sigSock.emit('join-room', { roomId: `camera-${deviceId}` });
+    }
   }, [deviceId, handlePeerJoined, handleAnswer, handleIceCandidate, handlePeerLeft]);
 
   // ── Heartbeat every 5s ──
@@ -613,25 +923,28 @@ export default function Camera() {
         </div>
       )}
 
+      {/* Vertical Zoom Slider (Right Edge) */}
+      {zoomRange.max > 1 && status === 'live' && (
+        <div style={styles.verticalZoomContainer}>
+          <span style={styles.verticalZoomLabel}>{zoom.toFixed(1)}x</span>
+          <input 
+            type="range" 
+            min={zoomRange.min} 
+            max={zoomRange.max} 
+            step={zoomRange.step} 
+            value={zoom} 
+            onChange={handleZoom} 
+            style={styles.verticalZoomSlider}
+            orient="vertical"
+          />
+          <span style={styles.verticalZoomLabel}>1.0x</span>
+        </div>
+      )}
+
       {/* Bottom Controls */}
       <div style={styles.controlsArea}>
         
-        {/* Zoom Slider */}
-        {zoomRange.max > 1 && status === 'live' && (
-          <div style={styles.zoomContainer}>
-            <span style={styles.zoomLabel}>1x</span>
-            <input 
-              type="range" 
-              min={zoomRange.min} 
-              max={zoomRange.max} 
-              step={zoomRange.step} 
-              value={zoom} 
-              onChange={handleZoom} 
-              style={styles.zoomSlider} 
-            />
-            <span style={styles.zoomLabel}>{Math.round(zoomRange.max)}x</span>
-          </div>
-        )}
+        {/* Zoom Slider has been moved to the right edge */}
 
         <div style={styles.controls}>
           <button style={styles.controlBtn} onClick={toggleFullscreen}>
@@ -654,6 +967,11 @@ export default function Camera() {
             <span style={styles.controlLabel}>{isTorch ? 'Torch Off' : 'Torch'}</span>
           </button>
 
+          <button style={{ ...styles.controlBtn, background: gyroSteady ? 'rgba(34, 197, 94, .2)' : 'rgba(255,255,255,.1)', borderColor: gyroSteady ? 'rgba(34, 197, 94, .5)' : 'rgba(255,255,255,.15)' }} onClick={enableGyroSteady}>
+            <span style={{ fontSize: '1.5rem' }}>{gyroSteady ? '🛸' : '🚁'}</span>
+            <span style={{ ...styles.controlLabel, color: gyroSteady ? '#4ade80' : '#fff' }}>{gyroSteady ? 'Super Steady' : 'Steady Off'}</span>
+          </button>
+
           <button style={styles.controlBtn} onClick={flipCamera}>
             <span style={{ fontSize: '1.5rem' }}>🔄</span>
             <span style={styles.controlLabel}>Flip</span>
@@ -664,9 +982,9 @@ export default function Camera() {
           <span style={styles.controlLabel}>Settings</span>
         </button>
 
-        <button style={{ ...styles.controlBtn, background: detectedBrand ? `${brandInfo[detectedBrand]?.color || '#3b82f6'}22` : 'rgba(255,255,255,.1)' }} onClick={() => setShowSetupGuide(true)}>
-          <span style={{ fontSize: '1.5rem' }}>📷</span>
-          <span style={styles.controlLabel}>Pro Cam</span>
+        <button style={{ ...styles.controlBtn, background: showProControls ? 'rgba(168, 85, 247, .2)' : 'rgba(255,255,255,.1)', borderColor: showProControls ? 'rgba(168, 85, 247, .5)' : 'rgba(255,255,255,.15)' }} onClick={() => setShowProControls(!showProControls)}>
+          <span style={{ fontSize: '1.5rem' }}>🎛️</span>
+          <span style={{ ...styles.controlLabel, color: showProControls ? '#c084fc' : '#fff' }}>Pro</span>
         </button>
       </div>
       </div>
@@ -766,6 +1084,226 @@ export default function Camera() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Pro Manual Controls Overlay */}
+      {showProControls && (
+        <div style={styles.proOverlay}>
+          <div style={styles.proHeader}>
+            <span style={styles.proTitle}>🎛️ Manual Controls</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={styles.proSetupBtn} onClick={() => { setShowProControls(false); setShowSetupGuide(true); }}>📷 Setup Guide</button>
+              <button style={styles.proCloseBtn} onClick={() => setShowProControls(false)}>✕</button>
+            </div>
+          </div>
+
+          <div style={styles.proBody}>
+              {/* ── HARDWARE CONTROLS (only shown when device supports them) ── */}
+              {proCaps && proCaps.iso && (
+                <div style={styles.proGroup}>
+                  <div style={styles.proGroupHeader}>
+                    <span style={styles.proLabel}>ISO <span style={styles.hwBadge}>HW</span></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={styles.proValue}>{Math.round(proValues.iso ?? proCaps.iso.min)}</span>
+                      {proModes.exposureMode === 'manual' && (
+                        <button style={styles.proAutoBtn} onClick={() => resetProModeToAuto('exposureMode')}>AUTO</button>
+                      )}
+                    </div>
+                  </div>
+                  <input type="range" min={proCaps.iso.min} max={proCaps.iso.max} step={proCaps.iso.step || 1}
+                    value={proValues.iso ?? proCaps.iso.min}
+                    onChange={e => applyProConstraint('iso', parseFloat(e.target.value))}
+                    style={styles.proSlider} />
+                  <div style={styles.proRange}>
+                    <span>{proCaps.iso.min}</span><span>{proCaps.iso.max}</span>
+                  </div>
+                </div>
+              )}
+
+              {proCaps && proCaps.exposureCompensation && (
+                <div style={styles.proGroup}>
+                  <div style={styles.proGroupHeader}>
+                    <span style={styles.proLabel}>EV ± <span style={styles.hwBadge}>HW</span></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={styles.proValue}>{(proValues.exposureCompensation ?? 0).toFixed(1)}</span>
+                      {proModes.exposureMode === 'manual' && (
+                        <button style={styles.proAutoBtn} onClick={() => resetProModeToAuto('exposureMode')}>AUTO</button>
+                      )}
+                    </div>
+                  </div>
+                  <input type="range" min={proCaps.exposureCompensation.min} max={proCaps.exposureCompensation.max} step={proCaps.exposureCompensation.step || 0.1}
+                    value={proValues.exposureCompensation ?? 0}
+                    onChange={e => applyProConstraint('exposureCompensation', parseFloat(e.target.value))}
+                    style={styles.proSlider} />
+                  <div style={styles.proRange}>
+                    <span>{proCaps.exposureCompensation.min}</span><span>0</span><span>+{proCaps.exposureCompensation.max}</span>
+                  </div>
+                </div>
+              )}
+
+              {proCaps && proCaps.exposureTime && (
+                <div style={styles.proGroup}>
+                  <div style={styles.proGroupHeader}>
+                    <span style={styles.proLabel}>Shutter <span style={styles.hwBadge}>HW</span></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={styles.proValue}>1/{Math.round(1 / ((proValues.exposureTime ?? proCaps.exposureTime.min) / 1000)) || '∞'}</span>
+                      {proModes.exposureMode === 'manual' && (
+                        <button style={styles.proAutoBtn} onClick={() => resetProModeToAuto('exposureMode')}>AUTO</button>
+                      )}
+                    </div>
+                  </div>
+                  <input type="range" min={proCaps.exposureTime.min} max={proCaps.exposureTime.max} step={proCaps.exposureTime.step || 1}
+                    value={proValues.exposureTime ?? proCaps.exposureTime.min}
+                    onChange={e => applyProConstraint('exposureTime', parseFloat(e.target.value))}
+                    style={styles.proSlider} />
+                  <div style={styles.proRange}>
+                    <span>Fast</span><span>Slow</span>
+                  </div>
+                </div>
+              )}
+
+              {proCaps && proCaps.focusDistance && (
+                <div style={styles.proGroup}>
+                  <div style={styles.proGroupHeader}>
+                    <span style={styles.proLabel}>Focus <span style={styles.hwBadge}>HW</span></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={styles.proValue}>{(proValues.focusDistance ?? proCaps.focusDistance.min).toFixed(1)}m</span>
+                      {proModes.focusMode === 'manual' && (
+                        <button style={styles.proAutoBtn} onClick={() => resetProModeToAuto('focusMode')}>AF</button>
+                      )}
+                    </div>
+                  </div>
+                  <input type="range" min={proCaps.focusDistance.min} max={proCaps.focusDistance.max} step={proCaps.focusDistance.step || 0.01}
+                    value={proValues.focusDistance ?? proCaps.focusDistance.min}
+                    onChange={e => applyProConstraint('focusDistance', parseFloat(e.target.value))}
+                    style={styles.proSlider} />
+                  <div style={styles.proRange}>
+                    <span>Near</span><span>Far</span>
+                  </div>
+                </div>
+              )}
+
+              {proCaps && proCaps.colorTemperature && (
+                <div style={styles.proGroup}>
+                  <div style={styles.proGroupHeader}>
+                    <span style={styles.proLabel}>WB / Kelvin <span style={styles.hwBadge}>HW</span></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={styles.proValue}>{Math.round(proValues.colorTemperature ?? proCaps.colorTemperature.min)}K</span>
+                      {proModes.whiteBalanceMode === 'manual' && (
+                        <button style={styles.proAutoBtn} onClick={() => resetProModeToAuto('whiteBalanceMode')}>AWB</button>
+                      )}
+                    </div>
+                  </div>
+                  <input type="range" min={proCaps.colorTemperature.min} max={proCaps.colorTemperature.max} step={proCaps.colorTemperature.step || 50}
+                    value={proValues.colorTemperature ?? proCaps.colorTemperature.min}
+                    onChange={e => applyProConstraint('colorTemperature', parseFloat(e.target.value))}
+                    style={{ ...styles.proSlider, background: 'linear-gradient(to right, #ff8c00, #fff, #87ceeb)' }} />
+                  <div style={styles.proRange}>
+                    <span>🔥 Warm</span><span>❄️ Cool</span>
+                  </div>
+                </div>
+              )}
+
+              {proCaps && proCaps.brightness && (
+                <div style={styles.proGroup}>
+                  <div style={styles.proGroupHeader}>
+                    <span style={styles.proLabel}>Brightness <span style={styles.hwBadge}>HW</span></span>
+                    <span style={styles.proValue}>{Math.round(proValues.brightness ?? proCaps.brightness.min)}</span>
+                  </div>
+                  <input type="range" min={proCaps.brightness.min} max={proCaps.brightness.max} step={proCaps.brightness.step || 1}
+                    value={proValues.brightness ?? proCaps.brightness.min}
+                    onChange={e => applyProConstraint('brightness', parseFloat(e.target.value))}
+                    style={styles.proSlider} />
+                  <div style={styles.proRange}>
+                    <span>{proCaps.brightness.min}</span><span>{proCaps.brightness.max}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ── DIVIDER ── */}
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '4px 0', position: 'relative' }}>
+                <span style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.85)', padding: '0 10px', fontSize: '.6rem', color: '#64748b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', fontFamily: 'system-ui, sans-serif' }}>Software Processing</span>
+              </div>
+
+              {/* ── SOFTWARE CONTROLS (always available) ── */}
+              {/* SW Brightness */}
+              <div style={styles.proGroup}>
+                <div style={styles.proGroupHeader}>
+                  <span style={styles.proLabel}>Brightness <span style={styles.swBadge}>SW</span></span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={styles.proValue}>{softDisplay.brightness.toFixed(1)}</span>
+                    {softDisplay.brightness !== 1 && <button style={styles.proAutoBtn} onClick={() => handleSoftControl('brightness', 1)}>RESET</button>}
+                  </div>
+                </div>
+                <input type="range" min={0.2} max={3.0} step={0.05}
+                  value={softDisplay.brightness}
+                  onChange={e => handleSoftControl('brightness', parseFloat(e.target.value))}
+                  style={styles.proSlider} />
+                <div style={styles.proRange}>
+                  <span>Dark</span><span>1.0</span><span>Bright</span>
+                </div>
+              </div>
+
+              {/* SW Contrast */}
+              <div style={styles.proGroup}>
+                <div style={styles.proGroupHeader}>
+                  <span style={styles.proLabel}>Contrast <span style={styles.swBadge}>SW</span></span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={styles.proValue}>{softDisplay.contrast.toFixed(1)}</span>
+                    {softDisplay.contrast !== 1 && <button style={styles.proAutoBtn} onClick={() => handleSoftControl('contrast', 1)}>RESET</button>}
+                  </div>
+                </div>
+                <input type="range" min={0.2} max={3.0} step={0.05}
+                  value={softDisplay.contrast}
+                  onChange={e => handleSoftControl('contrast', parseFloat(e.target.value))}
+                  style={styles.proSlider} />
+                <div style={styles.proRange}>
+                  <span>Flat</span><span>1.0</span><span>Punchy</span>
+                </div>
+              </div>
+
+              {/* SW Saturation */}
+              <div style={styles.proGroup}>
+                <div style={styles.proGroupHeader}>
+                  <span style={styles.proLabel}>Saturation <span style={styles.swBadge}>SW</span></span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={styles.proValue}>{softDisplay.saturate.toFixed(1)}</span>
+                    {softDisplay.saturate !== 1 && <button style={styles.proAutoBtn} onClick={() => handleSoftControl('saturate', 1)}>RESET</button>}
+                  </div>
+                </div>
+                <input type="range" min={0} max={3.0} step={0.05}
+                  value={softDisplay.saturate}
+                  onChange={e => handleSoftControl('saturate', parseFloat(e.target.value))}
+                  style={styles.proSlider} />
+                <div style={styles.proRange}>
+                  <span>B&W</span><span>1.0</span><span>Vivid</span>
+                </div>
+              </div>
+
+              {/* SW Warmth (Color Temperature) */}
+              <div style={styles.proGroup}>
+                <div style={styles.proGroupHeader}>
+                  <span style={styles.proLabel}>Warmth <span style={styles.swBadge}>SW</span></span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={styles.proValue}>{softDisplay.warmth > 0 ? '+' : ''}{softDisplay.warmth.toFixed(1)}</span>
+                    {softDisplay.warmth !== 0 && <button style={styles.proAutoBtn} onClick={() => handleSoftControl('warmth', 0)}>RESET</button>}
+                  </div>
+                </div>
+                <input type="range" min={-1} max={1} step={0.05}
+                  value={softDisplay.warmth}
+                  onChange={e => handleSoftControl('warmth', parseFloat(e.target.value))}
+                  style={{ ...styles.proSlider, background: 'linear-gradient(to right, #4682f0, #e8e8e8, #ff8c00)' }} />
+                <div style={styles.proRange}>
+                  <span>❄️ Cool</span><span>0</span><span>🔥 Warm</span>
+                </div>
+              </div>
+
+              {/* Reset All Button */}
+              <button onClick={resetSoftFilters} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', padding: '10px', borderRadius: 12, cursor: 'pointer', fontSize: '.8rem', fontWeight: 600, fontFamily: 'system-ui, sans-serif', marginTop: 4 }}>
+                ↺ Reset All Software Filters
+              </button>
+            </div>
         </div>
       )}
 
@@ -893,13 +1431,14 @@ const styles = {
   statsBar: { position: 'absolute', top: 52, left: 0, right: 0, padding: '4px 16px', display: 'flex', gap: 16, fontSize: '.7rem', color: '#94a3b8', fontFamily: 'system-ui, sans-serif', zIndex: 10 },
   
   controlsArea: { position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', flexDirection: 'column', background: 'linear-gradient(0deg, rgba(0,0,0,.8), transparent)', zIndex: 10, paddingBottom: 16 },
-  zoomContainer: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 32px', width: '100%', boxSizing: 'border-box' },
-  zoomLabel: { color: '#fff', fontSize: '.75rem', fontWeight: 600, fontFamily: 'system-ui, sans-serif', textShadow: '0 1px 2px #000' },
-  zoomSlider: { flex: 1, accentColor: '#3b82f6', height: 4 },
   
-  controls: { display: 'flex', justifyContent: 'space-around', alignItems: 'center', width: '100%', padding: '0 16px', boxSizing: 'border-box', marginTop: 8 },
-  controlBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 16, padding: '12px 20px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', backdropFilter: 'blur(8px)' },
-  controlLabel: { fontSize: '.65rem', color: '#cbd5e1', fontWeight: 600, fontFamily: 'system-ui, sans-serif' },
+  verticalZoomContainer: { position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,0.5)', padding: '20px 10px', borderRadius: 30, zIndex: 20, backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.1)' },
+  verticalZoomLabel: { color: '#fff', fontSize: '.75rem', fontWeight: 700, fontFamily: 'system-ui, sans-serif', textShadow: '0 1px 2px rgba(0,0,0,0.8)' },
+  verticalZoomSlider: { WebkitAppearance: 'slider-vertical', height: 160, width: 8, accentColor: '#3b82f6', cursor: 'pointer' },
+  
+  controls: { display: 'flex', alignItems: 'center', width: '100%', padding: '0 12px', boxSizing: 'border-box', marginTop: 8, overflowX: 'auto', gap: 8, WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' },
+  controlBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 14, padding: '10px 14px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', backdropFilter: 'blur(8px)', minWidth: 56, flexShrink: 0 },
+  controlLabel: { fontSize: '.6rem', color: '#cbd5e1', fontWeight: 600, fontFamily: 'system-ui, sans-serif', whiteSpace: 'nowrap' },
 
   errorPage: { position: 'fixed', inset: 0, background: '#0f172a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, fontFamily: 'system-ui, sans-serif' },
   errorIcon: { fontSize: '4rem', marginBottom: 16 },
@@ -907,14 +1446,32 @@ const styles = {
   errorText: { color: '#94a3b8', fontSize: '.9rem', textAlign: 'center', maxWidth: 320, lineHeight: 1.5 },
   
   // Settings UI
-  settingsOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 50, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' },
-  settingsModal: { background: '#111', width: '100%', maxHeight: '85vh', borderTopLeftRadius: 20, borderTopRightRadius: 20, display: 'flex', flexDirection: 'column', color: '#fff', fontFamily: 'system-ui, sans-serif' },
-  settingsHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #222' },
-  backBtn: { background: '#222', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '1.2rem' },
+  settingsOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 50, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' },
+  settingsModal: { background: '#111', width: '100%', maxHeight: '100vh', height: '100%', borderTopLeftRadius: 0, borderTopRightRadius: 0, display: 'flex', flexDirection: 'column', color: '#fff', fontFamily: 'system-ui, sans-serif' },
+  settingsHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #222', flexShrink: 0, position: 'sticky', top: 0, background: '#111', zIndex: 2 },
+  backBtn: { background: '#333', border: 'none', color: '#fff', width: 36, height: 36, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '1.2rem', flexShrink: 0 },
   settingsTitle: { margin: 0, fontSize: '1.1rem', fontWeight: 600 },
-  settingsBody: { padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24 },
+  settingsBody: { padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24, flex: 1 },
   settingGroup: { display: 'flex', flexDirection: 'column', gap: 8 },
   settingLabel: { fontSize: '.8rem', color: '#888', textTransform: 'uppercase', letterSpacing: 1, paddingLeft: 8, fontWeight: 600 },
   settingRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#1c1c1e', borderRadius: 12, cursor: 'pointer', fontSize: '1rem' },
-  checkIcon: { color: '#3b82f6', fontWeight: 'bold', fontSize: '1.2rem' }
+  checkIcon: { color: '#3b82f6', fontWeight: 'bold', fontSize: '1.2rem' },
+
+  // Pro Controls
+  proOverlay: { position: 'absolute', left: 0, right: 0, bottom: 110, maxHeight: '55vh', zIndex: 30, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(16px)', borderTopLeftRadius: 20, borderTopRightRadius: 20, display: 'flex', flexDirection: 'column', border: '1px solid rgba(168,85,247,0.2)', borderBottom: 'none' },
+  proHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)' },
+  proTitle: { color: '#c084fc', fontSize: '.9rem', fontWeight: 700, fontFamily: 'system-ui, sans-serif', letterSpacing: 0.5 },
+  proCloseBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', width: 28, height: 28, borderRadius: 14, cursor: 'pointer', fontSize: '.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  proSetupBtn: { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', padding: '4px 10px', borderRadius: 12, cursor: 'pointer', fontSize: '.7rem', fontWeight: 600, fontFamily: 'system-ui, sans-serif' },
+  proBody: { padding: '12px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 },
+  proEmpty: { padding: '32px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, fontFamily: 'system-ui, sans-serif' },
+  proGroup: { display: 'flex', flexDirection: 'column', gap: 4 },
+  proGroupHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  proLabel: { fontSize: '.75rem', color: '#a78bfa', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'system-ui, sans-serif' },
+  proValue: { fontSize: '.8rem', color: '#e2e8f0', fontWeight: 600, fontFamily: 'Consolas, monospace', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: 8 },
+  proSlider: { width: '100%', height: 6, accentColor: '#a855f7', cursor: 'pointer', borderRadius: 3 },
+  proRange: { display: 'flex', justifyContent: 'space-between', fontSize: '.65rem', color: '#64748b', fontFamily: 'system-ui, sans-serif' },
+  proAutoBtn: { background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)', color: '#4ade80', padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontSize: '.65rem', fontWeight: 700, fontFamily: 'system-ui, sans-serif' },
+  hwBadge: { display: 'inline-block', fontSize: '.55rem', padding: '1px 5px', borderRadius: 4, background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontWeight: 800, letterSpacing: 0.5, marginLeft: 6, verticalAlign: 'middle' },
+  swBadge: { display: 'inline-block', fontSize: '.55rem', padding: '1px 5px', borderRadius: 4, background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontWeight: 800, letterSpacing: 0.5, marginLeft: 6, verticalAlign: 'middle' },
 };

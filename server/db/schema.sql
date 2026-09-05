@@ -112,11 +112,24 @@ CREATE TABLE IF NOT EXISTS vmix_connections (
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Blackmagic ATEM Connections
+CREATE TABLE IF NOT EXISTS atem_connections (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT 'ATEM Switcher',
+  ip TEXT NOT NULL DEFAULT '192.168.1.50',
+  is_connected INTEGER NOT NULL DEFAULT 0,
+  auto_reconnect INTEGER NOT NULL DEFAULT 1,
+  model TEXT DEFAULT '',
+  last_connected TIMESTAMP WITH TIME ZONE,
+  last_error TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Production Logs
 CREATE TABLE IF NOT EXISTS production_logs (
   id SERIAL PRIMARY KEY,
   event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
-  type TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info','warning','error','vmix','device','stream','production')),
+  type TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info','warning','error','vmix','device','stream','production','atem')),
   source TEXT DEFAULT 'system',
   message TEXT NOT NULL,
   metadata TEXT DEFAULT '{}',

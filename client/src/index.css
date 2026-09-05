@@ -147,6 +147,25 @@ tr:hover td{background:var(--bg-card-hover)}
 .vmix-trans-btn.fade{background:var(--orange);color:#000;border-color:var(--orange)}
 .vmix-trans-btn:hover{transform:scale(1.05)}
 
+/* ═══ ATEM CONTROLS ═══ */
+.atem-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px}
+.atem-bus{display:flex;gap:8px;flex-wrap:wrap}
+.atem-bus-btn{padding:10px 14px;border-radius:var(--radius);font-weight:700;font-size:.85rem;cursor:pointer;border:2px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);transition:all .15s;min-width:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.atem-bus-btn:hover{border-color:var(--accent);transform:scale(1.04)}
+.atem-bus-btn.pgm{border-color:var(--red);background:linear-gradient(180deg, rgba(255,61,113,.25), rgba(255,61,113,.15));color:var(--red);box-shadow:0 0 12px rgba(255,61,113,.35)}
+.atem-bus-btn.pvw{border-color:var(--green);background:linear-gradient(180deg, rgba(0,229,155,.25), rgba(0,229,155,.15));color:var(--green);box-shadow:0 0 12px rgba(0,229,155,.35)}
+.atem-bus-btn .inp-sub{font-size:.65rem;opacity:.8;font-weight:500;text-transform:uppercase}
+.atem-transition-bar{display:flex;gap:8px;align-items:center;padding:12px;background:var(--bg-secondary);border-radius:var(--radius);margin-top:12px;flex-wrap:wrap}
+.atem-trans-btn{padding:10px 18px;border-radius:var(--radius);font-weight:800;font-size:.82rem;cursor:pointer;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);transition:all .15s}
+.atem-trans-btn:hover{transform:scale(1.04)}
+.atem-trans-btn.cut{background:var(--red);color:#fff;border-color:var(--red)}
+.atem-trans-btn.cut:hover{box-shadow:0 0 15px rgba(255,61,113,.5)}
+.atem-trans-btn.auto{background:#f39c12;color:#000;border-color:#f39c12}
+.atem-trans-btn.auto:hover{box-shadow:0 0 15px rgba(243,156,18,.5)}
+.atem-trans-btn.ftb{background:#2c3e50;color:#e74c3c;border:2px solid #e74c3c}
+.atem-trans-btn.ftb.active{background:#e74c3c;color:#fff;animation:ftb-pulse 1s infinite alternate}
+@keyframes ftb-pulse { from { box-shadow: 0 0 6px #e74c3c; } to { box-shadow: 0 0 18px #ff0000; } }
+
 /* ═══ CHARTS ═══ */
 .chart-container{position:relative;height:200px;width:100%}
 .mini-chart{height:80px}
@@ -160,6 +179,7 @@ tr:hover td{background:var(--bg-card-hover)}
 .log-type.warning{background:var(--orange)20;color:var(--orange)}
 .log-type.error{background:var(--red)20;color:var(--red)}
 .log-type.vmix{background:var(--accent2)20;color:var(--accent2)}
+.log-type.atem{background:rgba(0,188,212,.2);color:#00bcd4}
 .log-type.device{background:var(--green)20;color:var(--green)}
 .log-msg{color:var(--text-secondary);word-break:break-word}
 

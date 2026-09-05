@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { devicesApi, analyticsApi, streamsApi, vmixApi, rtmpApi } from '../api/client';
+import { devicesApi, analyticsApi, streamsApi, vmixApi, rtmpApi, atemApi } from '../api/client';
 import { productionSocket, signalingSocket } from '../socket';
 import { getIceConfig } from '../webrtc';
 import mpegts from 'mpegts.js';
@@ -14,6 +14,7 @@ export default function Production() {
   const [vmixConns, setVmixConns] = useState([]);
   const [vmixActive, setVmixActive] = useState(null);
   const [vmixStatus, setVmixStatus] = useState(null);
+  const [atemStatus, setAtemStatus] = useState(null);
   const [fullscreen, setFullscreen] = useState(null);
   const [showAddInput, setShowAddInput] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', label: '', group_name: 'Default' });
@@ -38,12 +39,14 @@ export default function Production() {
   const iceQueues = useRef({});
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
+  const pgmRelayPeers = useRef(new Map()); // peerId -> RTCPeerConnection for PGM feed
   const [updateTrigger, setUpdateTrigger] = useState(0);
   const [isFading, setIsFading] = useState(false);
   const [showAudioMixer, setShowAudioMixer] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
   const [rtmpStreams, setRtmpStreams] = useState([]);   // active RTMP streams
   const [rtmpStatus, setRtmpStatus] = useState(null);   // RTMP server status
+  const [qrData, setQrData] = useState(null);
   const rtmpPlayersRef = useRef({});  // streamKey -> mpegts.Player
 
   const demoCams = [
@@ -55,12 +58,20 @@ export default function Production() {
 
   const load = async () => {
     try {
-      const [d, l, v] = await Promise.all([devicesApi.list(), analyticsApi.logs('', 30), vmixApi.connections()]);
+      const [d, l, v, a] = await Promise.all([
+        devicesApi.list(),
+        analyticsApi.logs('', 30),
+        vmixApi.connections(),
+        atemApi.connections().catch(() => ({ connections: [] }))
+      ]);
       const devs = d.devices || [];
       setDevices(devs.length > 0 ? devs : demoCams);
       setLogs(l.logs || []);
       setVmixConns(v.connections || []);
       if (!vmixActive && v.connections?.[0]) setVmixActive(v.connections[0].id);
+      if (a.connections?.[0]) {
+        atemApi.status(a.connections[0].id).then(st => st?.success && setAtemStatus(st.status)).catch(() => {});
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -80,6 +91,25 @@ export default function Production() {
     productionSocket.on('device:offline', load);
     productionSocket.on('overlay-update', setOverlayData);
     productionSocket.on('log:new', (log) => setLogs(prev => [log, ...prev].slice(0, 50)));
+
+    // Blackmagic ATEM real-time state & hardware tally sync
+    productionSocket.on('atem:state', setAtemStatus);
+    productionSocket.on('atem:tally', (data) => {
+      if (data.pgmInput) {
+        setDevices(devList => {
+          const matching = devList[data.pgmInput - 1];
+          if (matching) setPgm(matching.id);
+          return devList;
+        });
+      }
+      if (data.pvwInput) {
+        setDevices(devList => {
+          const matching = devList[data.pvwInput - 1];
+          if (matching) setPvw(matching.id);
+          return devList;
+        });
+      }
+    });
 
     // RTMP stream events (DJI Pocket 3, GoPro, etc.)
     productionSocket.on('rtmp:stream-start', (data) => {
@@ -106,7 +136,12 @@ export default function Production() {
     }).catch(() => {});
 
     const id = setInterval(load, 20000);
-    return () => { clearInterval(id); productionSocket.disconnect(); };
+    return () => {
+      clearInterval(id);
+      productionSocket.off('atem:state');
+      productionSocket.off('atem:tally');
+      productionSocket.disconnect();
+    };
   }, []);
 
   // ── WebRTC: Connect to each online device's camera stream ──
@@ -208,12 +243,55 @@ export default function Production() {
     }
   }, [attachStream]);
 
-  // Setup signaling socket
+  // Setup signaling socket & PGM Master Broadcaster
   useEffect(() => {
     signalingSocket.connect();
 
+    const sendPgmOffer = async (peerId) => {
+      const activeStream = remoteStreams.current[pgm] || pgmVideoRef.current?.srcObject;
+      if (!activeStream) return;
+      try {
+        const iceConfig = await getIceConfig();
+        const pc = new RTCPeerConnection(iceConfig);
+        pgmRelayPeers.current.set(peerId, pc);
+
+        activeStream.getTracks().forEach(track => {
+          pc.addTrack(track, activeStream);
+        });
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            signalingSocket.emit('ice-candidate', {
+              targetId: peerId,
+              candidate: e.candidate,
+              streamId: 'pgm-master',
+            });
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+            try { pc.close(); } catch (_) {}
+            pgmRelayPeers.current.delete(peerId);
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        signalingSocket.emit('offer', {
+          targetId: peerId,
+          sdp: pc.localDescription,
+          streamId: 'pgm-master',
+        });
+        console.log('[Production] Sent PGM master offer to viewer:', peerId);
+      } catch (err) {
+        console.error('[Production] Failed to create PGM relay offer:', err);
+      }
+    };
+
     const onConnect = () => {
       console.log('[Production] Socket connected:', signalingSocket.id);
+      signalingSocket.emit('join-room', { roomId: 'pgm-master' });
       Object.entries(peerConns.current).forEach(([devId, val]) => {
         if (val === 'pending') signalingSocket.emit('join-room', { roomId: `camera-${devId}` });
       });
@@ -224,13 +302,39 @@ export default function Production() {
 
     signalingSocket.on('offer', handleCameraOffer);
 
+    signalingSocket.on('answer', async ({ fromId, sdp }) => {
+      const pc = pgmRelayPeers.current.get(fromId);
+      if (pc && pc.signalingState !== 'stable') {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          console.log('[Production] PGM relay connected to viewer:', fromId);
+        } catch (e) {
+          console.error('[Production] Error setting answer from viewer:', e);
+        }
+      }
+    });
+
+    signalingSocket.on('peer-joined', ({ peerId, roomId }) => {
+      if (!roomId || roomId === 'pgm-master') {
+        sendPgmOffer(peerId);
+      }
+    });
+
+    signalingSocket.on('need-offer', ({ fromId, roomId }) => {
+      if (!roomId || roomId === 'pgm-master') {
+        sendPgmOffer(fromId);
+      }
+    });
+
     signalingSocket.on('ice-candidate', ({ fromId, candidate, streamId }) => {
       const key = streamId || Object.keys(peerConns.current).find(k => typeof peerConns.current[k] === 'object');
-      if (!key) return;
-      const pc = peerConns.current[key];
-      if (pc && typeof pc === 'object' && pc.remoteDescription) {
-        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-      } else {
+      const cameraPc = key ? peerConns.current[key] : null;
+      const relayPc = pgmRelayPeers.current.get(fromId);
+      const targetPc = (cameraPc && typeof cameraPc === 'object') ? cameraPc : relayPc;
+
+      if (targetPc && targetPc.remoteDescription) {
+        targetPc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      } else if (key) {
         if (!iceQueues.current[key]) iceQueues.current[key] = [];
         iceQueues.current[key].push(candidate);
       }
@@ -239,12 +343,33 @@ export default function Production() {
     return () => {
       signalingSocket.off('connect', onConnect);
       signalingSocket.off('offer');
+      signalingSocket.off('answer');
+      signalingSocket.off('peer-joined');
+      signalingSocket.off('need-offer');
       signalingSocket.off('ice-candidate');
       signalingSocket.disconnect();
       Object.values(peerConns.current).forEach(v => { if (typeof v === 'object' && v.close) v.close(); });
       peerConns.current = {};
+      pgmRelayPeers.current.forEach(pc => { try { pc.close(); } catch(_) {} });
+      pgmRelayPeers.current.clear();
     };
-  }, [handleCameraOffer]);
+  }, [handleCameraOffer, pgm]);
+
+  // Seamlessly update PGM track on all connected PGM viewers when PGM changes
+  useEffect(() => {
+    const activeStream = remoteStreams.current[pgm] || pgmVideoRef.current?.srcObject;
+    if (!activeStream) return;
+
+    pgmRelayPeers.current.forEach(pc => {
+      try {
+        const senders = pc.getSenders();
+        activeStream.getTracks().forEach(track => {
+          const sender = senders.find(s => s.track?.kind === track.kind);
+          if (sender) sender.replaceTrack(track);
+        });
+      } catch (_) {}
+    });
+  }, [pgm, updateTrigger]);
 
   // Auto-connect to online devices
   useEffect(() => {
@@ -263,6 +388,12 @@ export default function Production() {
 
   const selectPgm = (id) => { 
     setPgm(id); 
+    try {
+      localStorage.setItem('pixel_current_pgm', id);
+      if (window.BroadcastChannel) {
+        new BroadcastChannel('pixel_perfect_pgm').postMessage({ type: 'pgm_change', pgmId: id, pvwId: pvw });
+      }
+    } catch (_) {}
     productionSocket.emit('tally-update', { pgmId: id, pvwId: pvw });
     devicesApi.setTally(id, 'program').catch(() => {}); 
     if (pgm && pgm !== id) devicesApi.setTally(pgm, pvw === pgm ? 'preview' : 'off').catch(() => {}); 
@@ -273,6 +404,34 @@ export default function Production() {
     devicesApi.setTally(id, 'preview').catch(() => {}); 
     if (pvw && pvw !== id) devicesApi.setTally(pvw, pgm === pvw ? 'program' : 'off').catch(() => {}); 
   };
+
+  // Cross-tab synchronization with /output/pgm window
+  useEffect(() => {
+    let bc;
+    try {
+      bc = new BroadcastChannel('pixel_perfect_pgm');
+      bc.onmessage = (e) => {
+        if (e.data?.type === 'request_pgm') {
+          const activePgm = pgm || devices.find(d => d.is_online)?.id || devices[0]?.id;
+          bc.postMessage({ type: 'pgm_change', pgmId: activePgm, pvwId: pvw });
+        }
+      };
+    } catch (_) {}
+
+    const syncInterval = setInterval(() => {
+      try {
+        const activePgm = pgm || devices.find(d => d.is_online)?.id;
+        if (bc && activePgm) {
+          bc.postMessage({ type: 'pgm_change', pgmId: activePgm, pvwId: pvw });
+        }
+      } catch (_) {}
+    }, 2000);
+
+    return () => {
+      clearInterval(syncInterval);
+      if (bc) bc.close();
+    };
+  }, [pgm, pvw, devices]);
 
   const doCut = () => { if (pvw) { const old = pgm; selectPgm(pvw); if (old) selectPvw(old); } };
   const doFade = () => {
@@ -340,7 +499,12 @@ export default function Production() {
 
   const copyPgmLink = () => {
     const token = localStorage.getItem('ag_token');
-    const url = `${window.location.origin}/output/pgm?token=${token}`;
+    const params = new URLSearchParams();
+    if (token && token !== 'null' && token !== 'undefined') params.set('token', token);
+    const effectivePgm = pgm || devices.find(d => d.is_online)?.id || devices[0]?.id;
+    if (effectivePgm) params.set('pgm', effectivePgm);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    const url = `${window.location.origin}/output/pgm${queryString}`;
     navigator.clipboard.writeText(url).then(() => {
       alert('vMix PGM Link Copied! Paste this URL into a vMix Web Browser Input.');
     }).catch(() => alert('Failed to copy.'));
@@ -370,8 +534,22 @@ export default function Production() {
 
   const openPgmDisplay = () => {
     const token = localStorage.getItem('ag_token');
-    const url = `${window.location.origin}/output/pgm?token=${token}`;
+    const params = new URLSearchParams();
+    if (token && token !== 'null' && token !== 'undefined') params.set('token', token);
+    const effectivePgm = pgm || devices.find(d => d.is_online)?.id || devices[0]?.id;
+    if (effectivePgm) params.set('pgm', effectivePgm);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    const url = `${window.location.origin}/output/pgm${queryString}`;
     window.open(url, '_blank');
+  };
+
+  const showQR = async (id) => {
+    try {
+      const d = await devicesApi.qr(id);
+      setQrData(d);
+    } catch (e) {
+      alert('Failed to load QR: ' + e.message);
+    }
   };
 
   const addInput = async () => {
@@ -556,7 +734,7 @@ export default function Production() {
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
               <button 
-                onClick={() => window.open('/output/pgm?token=' + localStorage.getItem('ag_token'), '_blank', 'width=1280,height=720')}
+                onClick={openPgmDisplay}
                 style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
                 title="Open in new window for extended monitors"
               >
@@ -659,7 +837,10 @@ export default function Production() {
                 <span style={{ background: 'rgba(0,0,0,.3)', padding: '0 4px', borderRadius: 2 }}>{i + 1}</span>
                 <span>{d.name}</span>
               </div>
-              <span style={{ cursor: 'pointer', padding: '0 4px' }} onClick={(e) => { e.stopPropagation(); deleteInput(d.id); }}>✕</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ cursor: 'pointer', padding: '0 4px' }} onClick={(e) => { e.stopPropagation(); showQR(d.id); }} title="QR Pair">📱</span>
+                <span style={{ cursor: 'pointer', padding: '0 4px' }} onClick={(e) => { e.stopPropagation(); deleteInput(d.id); }} title="Remove Input">✕</span>
+              </div>
             </div>
             
             {/* Input Video */}
@@ -771,6 +952,14 @@ export default function Production() {
           <button className="vmix-action-btn" style={rtmpStatus?.enabled ? { background: '#00c3ff22', color: '#00c3ff', border: '1px solid #00c3ff44' } : {}} title={rtmpStatus?.enabled ? `RTMP: ${rtmpStatus.rtmpUrl}` : 'RTMP disabled (set ENABLE_RTMP=true)'}>
             {rtmpStatus?.enabled ? `🎬 RTMP (${rtmpStreams.length} stream${rtmpStreams.length !== 1 ? 's' : ''})` : 'External'}
           </button>
+          <button
+            className="vmix-action-btn"
+            style={atemStatus?.connected ? { background: 'rgba(0,188,212,0.2)', color: '#00bcd4', border: '1px solid rgba(0,188,212,0.5)' } : {}}
+            title={atemStatus?.connected ? `Blackmagic ${atemStatus.model || 'ATEM'} Online (Click to Open Controls)` : 'Blackmagic ATEM Standby (Click to Open Controls)'}
+            onClick={() => window.open('/atem', '_blank')}
+          >
+            {atemStatus?.connected ? `🎚️ ATEM (${atemStatus.model || 'Online'})` : '🎚️ ATEM'}
+          </button>
           <button className={`vmix-action-btn ${isLive ? 'active' : ''}`} onClick={isLive ? goOff : goLive}>{isLive ? `● LIVE ${fmtTime(elapsed)}` : 'Stream ▾'}</button>
           <button className="vmix-action-btn">MultiCorder</button>
           <button className="vmix-action-btn">PlayList</button>
@@ -797,6 +986,27 @@ export default function Production() {
 
       {/* FTB OVERLAY */}
       {isFTB && <div style={{ position:'fixed',inset:0,background:'#000',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer' }} onClick={toggleFTB}><span style={{color:'#ef4444',fontSize:'2rem',fontWeight:900,animation:'pulse-badge 1s infinite'}}>FADE TO BLACK — Click to restore</span></div>}
+
+      {/* QR MODAL */}
+      {qrData && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={() => setQrData(null)}>
+          <div style={{background:'#1e293b',border:'1px solid #475569',borderRadius:12,padding:32,width:380,textAlign:'center',boxShadow:'0 20px 40px rgba(0,0,0,0.5)'}} onClick={e => e.stopPropagation()}>
+            <h3 style={{margin:'0 0 16px',color:'#f8fafc',fontSize:'1.4rem'}}>📱 Scan to Pair</h3>
+            <img src={qrData.qr} alt="QR Code" style={{ width: 260, borderRadius: 16, margin: '16px auto', display:'block', background:'#fff', padding:8 }} />
+            <p style={{ fontFamily: 'monospace', color: '#00c3ff', fontSize: '1.2rem', fontWeight:800, marginTop: 12, letterSpacing:2 }}>{qrData.pairing_token}</p>
+            {qrData.camera_url && (
+              <div style={{ marginTop: 16 }}>
+                <p style={{ fontSize: '.75rem', color: '#94a3b8', marginBottom: 12, wordBreak: 'break-all', padding:'0 12px' }}>{qrData.camera_url}</p>
+                <a href={qrData.camera_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '12px 24px', background:'#3b82f6', color:'#fff', textDecoration: 'none', borderRadius:6, fontWeight:600 }}>
+                  🎥 Open Camera Locally
+                </a>
+              </div>
+            )}
+            <p style={{ color: '#94a3b8', fontSize: '.85rem', marginTop: 24, lineHeight:1.5 }}>Scan this QR code with the Loyadham Live mobile app to connect the camera.</p>
+            <div style={{display:'flex',justifyContent:'center', marginTop:24}}><button style={{padding:'10px 24px',background:'#334155',border:'none',borderRadius:6,color:'#fff',fontWeight:600,cursor:'pointer'}} onClick={() => setQrData(null)}>Close</button></div>
+          </div>
+        </div>
+      )}
 
       {/* ADD INPUT MODAL */}
       {showAddInput && (

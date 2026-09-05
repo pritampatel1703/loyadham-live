@@ -82,6 +82,9 @@ class ConnectionManager {
 
     this.deviceSocket.on('device:tally', (data) => { this.emit('tally', data); });
 
+    // Forward remote camera commands from Production dashboard
+    this.deviceSocket.on('camera-cmd', (data) => { this.emit('camera-cmd', data); });
+
     this.deviceSocket.on('disconnect', () => {
       this.isConnected = false;
       this.stopHeartbeat();

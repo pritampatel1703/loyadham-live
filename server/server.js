@@ -23,12 +23,7 @@ const ALLOWED_ORIGINS = process.env.CLIENT_URL
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json({ limit: '10mb' }));
 
-// === LOCAL RENDERLESS MODE ===
-// Force the browser to nuke any old Service Workers and Cache that causes chrome-error://chromewebdata
-app.use((req, res, next) => {
-  res.setHeader('Clear-Site-Data', '"cache", "storage", "executionContexts"');
-  next();
-});
+
 
 // Serve static client build in production
 if (process.env.NODE_ENV === 'production') {
@@ -54,6 +49,7 @@ const { initDatabase } = require('./db/database');
   app.use('/api/streams', require('./routes/streams'));
   app.use('/api/events', require('./routes/events'));
   app.use('/api/vmix', require('./routes/vmix'));
+  app.use('/api/atem', require('./routes/atem'));
   app.use('/api/analytics', require('./routes/analytics'));
   app.use('/api/turn', require('./routes/turn'));
   app.use('/api/rtmp', require('./routes/rtmp'));

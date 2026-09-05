@@ -65,6 +65,16 @@ export const vmixApi = {
   action: (id, action, params) => api(`/api/vmix/${id}/action`, { method: 'POST', body: JSON.stringify({ action, params }) }),
 };
 
+export const atemApi = {
+  connections: () => api('/api/atem/connections'),
+  createConn: (d) => api('/api/atem/connections', { method: 'POST', body: JSON.stringify(d) }),
+  updateConn: (id, d) => api(`/api/atem/connections/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteConn: (id) => api(`/api/atem/connections/${id}`, { method: 'DELETE' }),
+  test: (id) => api(`/api/atem/${id}/test`, { method: 'POST' }),
+  status: (id) => api(`/api/atem/${id}/status`),
+  action: (id, action, params) => api(`/api/atem/${id}/action`, { method: 'POST', body: JSON.stringify({ action, params }) }),
+};
+
 export const analyticsApi = {
   realtime: () => api('/api/analytics/realtime'),
   history: (deviceId, limit) => api(`/api/analytics/history?device_id=${deviceId || ''}&limit=${limit || 100}`),
