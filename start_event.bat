@@ -1,5 +1,6 @@
 @echo off
 color 0b
+title LOYADHAM PIXEL PERFECT - EVENT SERVER
 set "ROOT=%~dp0"
 
 echo ===================================================
@@ -7,44 +8,67 @@ echo     LOYADHAM PIXEL PERFECT - LOCAL EVENT SERVER
 echo ===================================================
 echo.
 
-echo Cleaning up previous background processes...
+:: 1. Prepend local portable Node.js and standard paths to PATH if they exist
+if exist "%ROOT%bin\nodejs" set "PATH=%ROOT%bin\nodejs;%PATH%"
+if exist "C:\Program Files\nodejs" set "PATH=C:\Program Files\nodejs;%PATH%"
+
+:: 2. Check if any required tech or dependencies are missing on this PC
+set "NEED_SETUP=0"
+
+where node >nul 2>&1
+if %ERRORLEVEL% NEQ 0 set "NEED_SETUP=1"
+
+where npm.cmd >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    where npm >nul 2>&1
+    if %ERRORLEVEL% NEQ 0 set "NEED_SETUP=1"
+)
+
+if not exist "%ROOT%cloudflared.exe" set "NEED_SETUP=1"
+if not exist "%ROOT%client\node_modules" set "NEED_SETUP=1"
+if not exist "%ROOT%client\dist\index.html" set "NEED_SETUP=1"
+if not exist "%ROOT%server\node_modules" set "NEED_SETUP=1"
+
+:: 3. If anything is missing, run automated PC setup and installation
+if "%NEED_SETUP%"=="1" (
+    echo [!] Missing required technology or dependencies detected on this PC.
+    echo [*] Starting automatic installer and environment setup...
+    echo.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%setup_environment.ps1"
+    if %ERRORLEVEL% NEQ 0 (
+        color 0c
+        echo.
+        echo [ERROR] Automatic environment installation failed.
+        echo Please make sure this PC is connected to the internet.
+        pause
+        exit /b 1
+    )
+    :: Refresh PATH in case Node was just downloaded to bin\nodejs
+    if exist "%ROOT%bin\nodejs" set "PATH=%ROOT%bin\nodejs;%PATH%"
+    echo.
+)
+
+:: 4. Clean up any leftover processes from previous runs
+echo [*] Cleaning up previous background processes...
 taskkill /F /IM node.exe >nul 2>&1
 taskkill /F /IM cloudflared.exe >nul 2>&1
 echo.
 
-echo [1/4] Building latest dashboard...
-pushd "%ROOT%client"
-call npm run build
-popd
-
-echo.
-echo [2/4] Preparing server...
-pushd "%ROOT%server"
-call npm install
-popd
-
-echo.
-echo [3/4] Checking Cloudflare Tunnel (for 5G phones)...
-if not exist "%ROOT%cloudflared.exe" (
-    echo Downloading Cloudflare Tunnel... please wait...
-    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile '%ROOT%cloudflared.exe'"
-)
-
-echo.
-echo [4/4] Starting Server and Public Tunnel...
-
-:: Start the server in a separate window using the helper script
-:: We use 'call' to prevent Windows from stripping the quotes around %ROOT%
+:: 5. Launch the Server in a separate window
+echo [*] Starting Loyadham Server on Port 4000...
 start "Loyadham Server" call "%ROOT%_run_server.bat"
 
 :: Wait for the server to boot up safely
 ping 127.0.0.1 -n 4 >nul
 
-:: Launch the Node.js helper that prints IP, QR code, and handles Cloudflare
+:: 6. Launch the Cloudflare Tunnel and QR Code Info Display
+echo [*] Generating Local Network and Public 5G Cloudflare Tunnel...
 pushd "%ROOT%server"
 node print_info.js
 popd
 
 echo.
-echo Startup complete. If the server window did not open, read the errors above.
+echo ===================================================
+echo Event server session has ended.
+echo ===================================================
 pause
