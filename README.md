@@ -13,24 +13,14 @@ Real-time multi-camera broadcast production and event coordination system featur
 
 You can copy this folder or run directly from an external drive on any Windows PC.
 
-### Option 1: Automatic 1-Click Event Startup (Recommended)
+### Starting the Event
 Simply double-click:
 ```
 start_event.bat
 ```
-- If the PC is already configured, it launches the server immediately.
-- If the PC is missing Node.js, dependencies, or Cloudflare Tunnel, **it automatically downloads, installs, and configures everything in the background without needing Administrator permissions!**
-
-### Option 2: Pre-Event PC Setup Wizard
-If you want to prepare or verify an event laptop ahead of time:
-```
-setup_pc.bat
-```
-This runs the automated diagnostics and tech installer:
-1. **Node.js & npm**: Detects system installation or downloads standalone Node.js LTS into `bin\nodejs`.
-2. **Cloudflare Tunnel**: Downloads `cloudflared.exe` if missing.
-3. **Client Dashboard**: Runs `npm install` and builds the dashboard bundle (`client/dist`).
-4. **Server Backend**: Runs `npm install` for backend dependencies.
+- **Auto-Detection & Auto-Install**: If the PC is missing Node.js, dependencies, or Cloudflare Tunnel, `start_event.bat` automatically downloads, installs, and configures everything in the background without needing Administrator privileges.
+- Starts the backend server on port 4000.
+- Launches the public Cloudflare tunnel and displays the QR code for mobile camera crews.
 
 ### Stopping the Event
 To cleanly terminate the server, tunnel, and release network ports (4000, 8009, 1935):
