@@ -39,8 +39,18 @@ router.post('/', authenticate, requireRole('operator'), async (req, res) => {
     const token = uuidv4().replace(/-/g, '').slice(0, 12).toUpperCase();
     await helpers.createDevice(id, name || 'Camera', label || '', group_name || 'Default', token);
     await helpers.addLog(null, 'device', 'system', `Device "${name || 'Camera'}" registered`, JSON.stringify({ device_id: id }));
+    
+    // Broadcast creation to UI dashboards
+    const io = req.app.get('io');
+    if (io) {
+      io.of('/production').emit('device:created', { id, name: name || 'Camera' });
+    }
+
     res.status(201).json({ id, name: name || 'Camera', pairing_token: token });
-  } catch (err) { console.error('[DEVICES]', err); res.status(500).json({ error: 'Failed' }); }
+  } catch (err) {
+    console.error('[DEVICES] Create device error:', err);
+    res.status(500).json({ error: 'Failed to create device: ' + (err.message || 'Server error') });
+  }
 });
 
 router.put('/:id', authenticate, requireRole('operator'), async (req, res) => {
@@ -52,8 +62,17 @@ router.put('/:id', authenticate, requireRole('operator'), async (req, res) => {
 });
 
 router.delete('/:id', authenticate, requireRole('production_admin'), async (req, res) => {
-  await helpers.deleteDevice(req.params.id);
-  res.json({ success: true });
+  try {
+    await helpers.deleteDevice(req.params.id);
+    const io = req.app.get('io');
+    if (io) {
+      io.of('/production').emit('device:deleted', { id: req.params.id });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[DEVICES] Delete device error:', err);
+    res.status(500).json({ error: 'Failed to delete device: ' + (err.message || 'Server error') });
+  }
 });
 
 router.post('/:id/tags', authenticate, requireRole('operator'), async (req, res) => {

@@ -1,14 +1,22 @@
 {
   "devices": [
     {
-      "id": "ef69ce93-03d8-40f3-9e00-8c8620391d57",
+      "id": "a866399d-8c4f-4091-bb49-3c0c1585f4a2",
       "name": "Pritam Patel",
       "label": "",
       "group_name": "Default",
-      "pairing_token": "C76394D41A1E",
+      "pairing_token": "A6BB83E2E490",
       "is_online": 1,
-      "battery_percent": 100,
-      "signal_quality": 100
+      "battery_percent": 28,
+      "signal_quality": 16,
+      "temperature": -1,
+      "stream_resolution": "1920x1080",
+      "stream_fps": 30,
+      "stream_bitrate": 0,
+      "network_type": "4G",
+      "ip_address": "",
+      "tally_state": "program",
+      "tags": []
     }
   ]
 }

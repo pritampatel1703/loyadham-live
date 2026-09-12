@@ -18,15 +18,43 @@ export default function Devices() {
     productionSocket.on('device:online', load);
     productionSocket.on('device:offline', load);
     productionSocket.on('device:heartbeat', load);
+    productionSocket.on('device:created', load);
+    productionSocket.on('device:deleted', load);
     const id = setInterval(load, 10000);
     return () => { clearInterval(id); productionSocket.disconnect(); };
   }, []);
 
   const addDevice = async () => {
-    try { await devicesApi.create(form); setShowAdd(false); setForm({ name: '', label: '', group_name: 'Default' }); load(); } catch (e) { alert(e.message); }
+    try {
+      const created = await devicesApi.create(form);
+      setShowAdd(false);
+      setForm({ name: '', label: '', group_name: 'Default' });
+      await load();
+      if (created && created.id) {
+        showQR(created.id);
+      }
+    } catch (e) {
+      alert('Error creating device: ' + e.message);
+    }
   };
-  const delDevice = async (id) => { if (confirm('Delete device?')) { await devicesApi.delete(id); load(); } };
-  const showQR = async (id) => { const d = await devicesApi.qr(id); setQrData(d); };
+  const delDevice = async (id) => {
+    if (confirm('Delete device?')) {
+      try {
+        await devicesApi.delete(id);
+        await load();
+      } catch (e) {
+        alert('Error deleting device: ' + e.message);
+      }
+    }
+  };
+  const showQR = async (id) => {
+    try {
+      const d = await devicesApi.qr(id);
+      setQrData(d);
+    } catch (e) {
+      alert('Failed to generate QR: ' + e.message);
+    }
+  };
 
   const copyVmixLink = (id) => {
     const url = `${window.location.origin}/output/${id}`;

@@ -34,7 +34,7 @@ echo.
 
 :: 4. Start Loyadham Server in a separate window
 echo [*] Starting Loyadham Server on Port 4000...
-start "Loyadham Server" call "%ROOT%_run_server.bat"
+start "Loyadham Server" cmd.exe /c ""%ROOT%_run_server.bat""
 
 :: Wait for the server to bind port 4000
 ping 127.0.0.1 -n 4 >nul

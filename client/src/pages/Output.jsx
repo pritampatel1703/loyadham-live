@@ -9,6 +9,7 @@ export default function Output() {
   const pcRef = useRef(null);
   const iceQueue = useRef([]);
   const [status, setStatus] = useState('Waiting for camera...');
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
 
   const connectCamera = useCallback(async () => {
     if (pcRef.current) return pcRef.current;
@@ -22,19 +23,17 @@ export default function Output() {
       setStatus('');
       if (videoRef.current) {
         videoRef.current.srcObject = e.streams[0];
-        // Browsers require interaction or muted for autoplay. 
-        // vMix browser input bypasses this automatically.
+        // Start muted for autoplay compliance, unmute on user click
+        videoRef.current.muted = true;
         videoRef.current.play().catch(err => {
-          console.warn('Autoplay prevented, trying muted:', err);
-          videoRef.current.muted = true;
-          videoRef.current.play().catch(e => console.error(e));
+          console.warn('Autoplay prevented:', err);
         });
       }
     };
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        signalingSocket.emit('ice-candidate', { targetId: `camera-${id}`, candidate: e.candidate });
+        signalingSocket.emit('ice-candidate', { targetId: `camera-${id}`, candidate: e.candidate, streamId: id });
       }
     };
 
@@ -50,6 +49,7 @@ export default function Output() {
     };
 
     signalingSocket.emit('join-room', { roomId: `camera-${id}` });
+    signalingSocket.emit('request-offer', { roomId: `camera-${id}` });
     return pc;
   }, [id]);
 
@@ -84,21 +84,50 @@ export default function Output() {
       }
     });
 
+    // When a peer joins our camera room, request an offer from them
+    signalingSocket.on('peer-joined', ({ peerId, roomId }) => {
+      if (roomId === `camera-${id}`) {
+        signalingSocket.emit('request-offer', { targetId: peerId, roomId });
+      }
+    });
+
+    // On reconnect, rejoin the room and request offers
+    const onConnect = () => {
+      signalingSocket.emit('join-room', { roomId: `camera-${id}` });
+      signalingSocket.emit('request-offer', { roomId: `camera-${id}` });
+    };
+    signalingSocket.on('connect', onConnect);
+    if (signalingSocket.connected) onConnect();
+
     // Start connection
     connectCamera();
 
     return () => {
       signalingSocket.off('offer');
       signalingSocket.off('ice-candidate');
+      signalingSocket.off('peer-joined');
+      signalingSocket.off('connect', onConnect);
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
       }
     };
-  }, [connectCamera, handleOffer]);
+  }, [connectCamera, handleOffer, id]);
+
+  // Click-to-unmute gesture
+  const handleUnmute = () => {
+    setAudioUnlocked(true);
+    if (videoRef.current) {
+      videoRef.current.muted = false;
+      videoRef.current.play().catch(() => {});
+    }
+  };
 
   return (
-    <div style={{ margin: 0, padding: 0, width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
+    <div
+      onClick={handleUnmute}
+      style={{ margin: 0, padding: 0, width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', cursor: status ? 'default' : 'none' }}
+    >
       {status && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'sans-serif', zIndex: 10 }}>
           {status}
@@ -107,9 +136,28 @@ export default function Output() {
       <video
         ref={videoRef}
         autoPlay
+        muted
         playsInline
         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
       />
+      {!audioUnlocked && !status && (
+        <div style={{
+          position: 'absolute',
+          bottom: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(30, 41, 59, 0.85)',
+          color: '#cbd5e1',
+          padding: '8px 20px',
+          borderRadius: 8,
+          fontSize: '0.85rem',
+          border: '1px solid rgba(71, 85, 105, 0.5)',
+          cursor: 'pointer',
+          zIndex: 20,
+        }}>
+          🔊 Click anywhere to unmute audio
+        </div>
+      )}
     </div>
   );
 }

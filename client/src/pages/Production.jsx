@@ -8,6 +8,7 @@ export default function Production() {
   const [devices, setDevices] = useState([]);
   const [logs, setLogs] = useState([]);
   const [pgm, setPgm] = useState(null);
+  const pgmRef = useRef(null);
   const [pvw, setPvw] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [isLive, setIsLive] = useState(false);
@@ -40,6 +41,8 @@ export default function Production() {
   const peerConns = useRef({});  // deviceId -> RTCPeerConnection
   const remoteStreams = useRef({}); // deviceId -> MediaStream
   const pgmRelayPeers = useRef(new Map()); // peerId -> RTCPeerConnection for PGM feed
+  const pendingPgmViewers = useRef(new Set()); // viewers waiting for PGM stream
+  const sendPgmOfferRef = useRef(null);
   const [updateTrigger, setUpdateTrigger] = useState(0);
   const [isFading, setIsFading] = useState(false);
   const [showAudioMixer, setShowAudioMixer] = useState(false);
@@ -49,12 +52,7 @@ export default function Production() {
   const [qrData, setQrData] = useState(null);
   const rtmpPlayersRef = useRef({});  // streamKey -> mpegts.Player
 
-  const demoCams = [
-    { id: 'd1', name: 'CAM 1 — Main Hall', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4500, battery_percent: 87, signal_quality: 92, tally_state: 'off' },
-    { id: 'd2', name: 'CAM 2 — Stage Left', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 3800, battery_percent: 64, signal_quality: 78, tally_state: 'off' },
-    { id: 'd3', name: 'CAM 3 — Wide Shot', is_online: true, stream_resolution: '1920x1080', stream_fps: 30, stream_bitrate: 4200, battery_percent: 45, signal_quality: 85, tally_state: 'off' },
-    { id: 'd4', name: 'CAM 4 — Close Up', is_online: false, stream_resolution: '1280x720', stream_fps: 25, stream_bitrate: 2800, battery_percent: 23, signal_quality: 55, tally_state: 'off' },
-  ];
+
 
   const load = async () => {
     try {
@@ -65,7 +63,7 @@ export default function Production() {
         atemApi.connections().catch(() => ({ connections: [] }))
       ]);
       const devs = d.devices || [];
-      setDevices(devs.length > 0 ? devs : demoCams);
+      setDevices(devs.length > 0 ? devs : []);
       setLogs(l.logs || []);
       setVmixConns(v.connections || []);
       if (!vmixActive && v.connections?.[0]) setVmixActive(v.connections[0].id);
@@ -89,6 +87,8 @@ export default function Production() {
     });
     productionSocket.on('device:online', load);
     productionSocket.on('device:offline', load);
+    productionSocket.on('device:created', load);
+    productionSocket.on('device:deleted', load);
     productionSocket.on('overlay-update', setOverlayData);
     productionSocket.on('log:new', (log) => setLogs(prev => [log, ...prev].slice(0, 50)));
 
@@ -243,14 +243,59 @@ export default function Production() {
     }
   }, [attachStream]);
 
+  // Helper: get current PGM media stream (WebRTC, srcObject, or captureStream fallback)
+  const getActivePgmStream = useCallback(() => {
+    const currentId = pgmRef.current;
+    if (currentId && remoteStreams.current[currentId]) {
+      return remoteStreams.current[currentId];
+    }
+    if (pgmVideoRef.current?.srcObject) {
+      return pgmVideoRef.current.srcObject;
+    }
+    if (pgmVideoRef.current && typeof pgmVideoRef.current.captureStream === 'function') {
+      try {
+        const stream = pgmVideoRef.current.captureStream();
+        if (stream && stream.getVideoTracks().length > 0) return stream;
+      } catch (_) {}
+    }
+    return null;
+  }, []);
+
   // Setup signaling socket & PGM Master Broadcaster
   useEffect(() => {
     signalingSocket.connect();
 
     const sendPgmOffer = async (peerId) => {
-      const activeStream = remoteStreams.current[pgm] || pgmVideoRef.current?.srcObject;
-      if (!activeStream) return;
+      const activeStream = getActivePgmStream();
+      if (!activeStream) {
+        console.log('[Production] No PGM stream yet, queuing viewer:', peerId);
+        pendingPgmViewers.current.add(peerId);
+        return;
+      }
+      pendingPgmViewers.current.delete(peerId);
       try {
+        // If we already have a healthy relay to this peer, don't tear it down
+        const existingPc = pgmRelayPeers.current.get(peerId);
+        if (existingPc && typeof existingPc === 'object' &&
+            existingPc.connectionState !== 'closed' &&
+            existingPc.connectionState !== 'failed') {
+          // Connection is still healthy — just ensure tracks are up to date
+          try {
+            const senders = existingPc.getSenders();
+            activeStream.getTracks().forEach(track => {
+              const sender = senders.find(s => s.track?.kind === track.kind);
+              if (sender) sender.replaceTrack(track);
+            });
+          } catch (_) {}
+          console.log('[Production] Reused existing healthy relay for viewer:', peerId);
+          return;
+        }
+
+        // Close stale/broken relay if any
+        if (existingPc && typeof existingPc === 'object') {
+          try { existingPc.close(); } catch (_) {}
+        }
+
         const iceConfig = await getIceConfig();
         const pc = new RTCPeerConnection(iceConfig);
         pgmRelayPeers.current.set(peerId, pc);
@@ -288,6 +333,7 @@ export default function Production() {
         console.error('[Production] Failed to create PGM relay offer:', err);
       }
     };
+    sendPgmOfferRef.current = sendPgmOffer;
 
     const onConnect = () => {
       console.log('[Production] Socket connected:', signalingSocket.id);
@@ -353,13 +399,15 @@ export default function Production() {
       pgmRelayPeers.current.forEach(pc => { try { pc.close(); } catch(_) {} });
       pgmRelayPeers.current.clear();
     };
-  }, [handleCameraOffer, pgm]);
+  }, [handleCameraOffer]);
 
   // Seamlessly update PGM track on all connected PGM viewers when PGM changes
+  // AND flush any pending viewers that were waiting for a stream
   useEffect(() => {
-    const activeStream = remoteStreams.current[pgm] || pgmVideoRef.current?.srcObject;
+    const activeStream = getActivePgmStream();
     if (!activeStream) return;
 
+    // Update tracks on existing relay peers
     pgmRelayPeers.current.forEach(pc => {
       try {
         const senders = pc.getSenders();
@@ -369,11 +417,23 @@ export default function Production() {
         });
       } catch (_) {}
     });
+
+    // Flush pending viewers — now there IS a stream to send
+    if (pendingPgmViewers.current.size > 0 && sendPgmOfferRef.current) {
+      console.log('[Production] Flushing', pendingPgmViewers.current.size, 'pending PGM viewers');
+      const viewers = [...pendingPgmViewers.current];
+      viewers.forEach(id => sendPgmOfferRef.current(id));
+    }
   }, [pgm, updateTrigger]);
 
   // Auto-connect to online devices
   useEffect(() => {
     devices.filter(d => d.is_online).forEach(d => connectToCamera(d.id));
+    // Auto-select first online camera as PGM if none is selected
+    if (!pgmRef.current) {
+      const firstOnline = devices.find(d => d.is_online);
+      if (firstOnline) selectPgm(firstOnline.id);
+    }
   }, [devices, connectToCamera]);
 
   useEffect(() => {
@@ -384,10 +444,11 @@ export default function Production() {
     return () => clearInterval(id);
   }, [vmixActive]);
 
-  // demoCams defined at top of component (before load()) to avoid TDZ
+
 
   const selectPgm = (id) => { 
-    setPgm(id); 
+    setPgm(id);
+    pgmRef.current = id;
     try {
       localStorage.setItem('pixel_current_pgm', id);
       if (window.BroadcastChannel) {
@@ -498,13 +559,7 @@ export default function Production() {
   };
 
   const copyPgmLink = () => {
-    const token = localStorage.getItem('ag_token');
-    const params = new URLSearchParams();
-    if (token && token !== 'null' && token !== 'undefined') params.set('token', token);
-    const effectivePgm = pgm || devices.find(d => d.is_online)?.id || devices[0]?.id;
-    if (effectivePgm) params.set('pgm', effectivePgm);
-    const queryString = params.toString() ? `?${params.toString()}` : '';
-    const url = `${window.location.origin}/output/pgm${queryString}`;
+    const url = `${window.location.origin}/output/pgm`;
     navigator.clipboard.writeText(url).then(() => {
       alert('vMix PGM Link Copied! Paste this URL into a vMix Web Browser Input.');
     }).catch(() => alert('Failed to copy.'));
@@ -533,14 +588,7 @@ export default function Production() {
   };
 
   const openPgmDisplay = () => {
-    const token = localStorage.getItem('ag_token');
-    const params = new URLSearchParams();
-    if (token && token !== 'null' && token !== 'undefined') params.set('token', token);
-    const effectivePgm = pgm || devices.find(d => d.is_online)?.id || devices[0]?.id;
-    if (effectivePgm) params.set('pgm', effectivePgm);
-    const queryString = params.toString() ? `?${params.toString()}` : '';
-    const url = `${window.location.origin}/output/pgm${queryString}`;
-    window.open(url, '_blank');
+    window.open(`${window.location.origin}/output/pgm`, '_blank');
   };
 
   const showQR = async (id) => {
@@ -553,11 +601,26 @@ export default function Production() {
   };
 
   const addInput = async () => {
-    try { await devicesApi.create(addForm); setShowAddInput(false); setAddForm({ name: '', label: '', group_name: 'Default' }); load(); } catch (e) { alert(e.message); }
+    try {
+      const created = await devicesApi.create(addForm);
+      setShowAddInput(false);
+      setAddForm({ name: '', label: '', group_name: 'Default' });
+      await load();
+      if (created && created.id) {
+        showQR(created.id);
+      }
+    } catch (e) {
+      alert('Error creating input: ' + e.message);
+    }
   };
   const deleteInput = async (id) => {
     if (!confirm('Remove this input?')) return;
-    try { await devicesApi.delete(id); load(); } catch (e) { alert(e.message); }
+    try {
+      await devicesApi.delete(id);
+      await load();
+    } catch (e) {
+      alert('Error removing input: ' + e.message);
+    }
   };
 
   const fmtTime = (s) => { const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); const sec = s%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; };
@@ -930,7 +993,7 @@ export default function Production() {
                   }
                 }}
                 autoPlay playsInline muted
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
               <span style={{ position: 'absolute', top: 4, right: 4, background: '#00c3ff', color: '#000', fontSize: '.55rem', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>RTMP</span>
             </div>

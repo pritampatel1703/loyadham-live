@@ -10,6 +10,8 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000 // Fast fail if database is offline (Local Mode)
 });
 
+let dbOffline = false;
+
 async function initDatabase() {
   try {
     const client = await pool.connect();
@@ -44,7 +46,8 @@ async function initDatabase() {
     client.release();
     console.log('[DB] Database schema initialized');
   } catch (err) {
-    console.error('[DB] Initialization error:', err);
+    dbOffline = true;
+    console.log('[DB] PostgreSQL offline, running in In-Memory Offline Mode');
   }
 }
 
@@ -62,6 +65,7 @@ try {
 const memDB = {
   users: [{ id: 'admin-1', username: 'admin', password_hash: bcrypt.hashSync('PixelPerfect@2026', 10), display_name: 'Super Admin', role: 'super_admin' }],
   devices: initialDevices,
+  tags: [],
   streams: [],
   events: [],
   vmix: [{ id: 'vmix-1', name: 'Default vMix', host: '127.0.0.1', port: 8088, is_connected: 0, auto_reconnect: 1 }],
@@ -86,21 +90,21 @@ async function checkDb() {
 
 async function queryOne(sql, params = []) {
   if (await checkDb()) {
-    try { const { rows } = await pool.query(sql, params); return rows[0] || null; } catch (e) {}
+    try { const { rows } = await pool.query(sql, params); return rows[0] || null; } catch (e) { dbOffline = true; }
   }
   return mockDbQuery(sql, params, true);
 }
 
 async function queryAll(sql, params = []) {
   if (await checkDb()) {
-    try { const { rows } = await pool.query(sql, params); return rows; } catch (e) {}
+    try { const { rows } = await pool.query(sql, params); return rows; } catch (e) { dbOffline = true; }
   }
   return mockDbQuery(sql, params, false);
 }
 
 async function run(sql, params = []) {
   if (await checkDb()) {
-    try { return await pool.query(sql, params); } catch (e) {}
+    try { return await pool.query(sql, params); } catch (e) { dbOffline = true; }
   }
   mockDbRun(sql, params);
   return { rowCount: 1 };
@@ -109,13 +113,34 @@ async function run(sql, params = []) {
 // ═══ Offline Mock Logic ═══
 function mockDbQuery(sql, params, isOne) {
   let result = [];
-  if (sql.includes('FROM devices')) result = memDB.devices;
+  if (sql.includes('FROM devices')) {
+    result = [...memDB.devices];
+    if (sql.includes('WHERE group_name')) {
+      result = result.filter(r => r.group_name === params[0]);
+    } else if (sql.includes('WHERE is_online = 1')) {
+      result = result.filter(r => r.is_online === 1);
+    }
+  }
+  else if (sql.includes('FROM device_tags')) {
+    const tags = memDB.tags || [];
+    result = tags.filter(t => t.device_id === params[0]);
+  }
   else if (sql.includes('FROM streams')) result = memDB.streams;
   else if (sql.includes('FROM events')) result = memDB.events;
   else if (sql.includes('FROM users')) result = memDB.users;
   else if (sql.includes('FROM vmix_connections')) result = memDB.vmix;
   else if (sql.includes('FROM atem_connections')) result = memDB.atem;
-  else if (sql.includes('COUNT')) return isOne ? { count: 0 } : [{ count: 0 }];
+  else if (sql.includes('COUNT')) {
+    if (sql.includes('FROM devices WHERE is_online=1')) {
+      const count = memDB.devices.filter(d => d.is_online === 1).length;
+      return isOne ? { count } : [{ count }];
+    }
+    if (sql.includes('FROM devices')) {
+      const count = memDB.devices.length;
+      return isOne ? { count } : [{ count }];
+    }
+    return isOne ? { count: 0 } : [{ count: 0 }];
+  }
   
   if (sql.includes('WHERE id')) {
     result = result.filter(r => r.id === params[0]);
@@ -128,11 +153,56 @@ function mockDbQuery(sql, params, isOne) {
 
 function mockDbRun(sql, params) {
   if (sql.includes('INSERT INTO devices')) {
-    memDB.devices.push({ id: params[0], name: params[1], label: params[2], group_name: params[3], pairing_token: params[4], is_online: 0, battery_percent: 100, signal_quality: 100 });
+    memDB.devices.push({
+      id: params[0],
+      name: params[1],
+      label: params[2],
+      group_name: params[3],
+      pairing_token: params[4],
+      is_online: 0,
+      battery_percent: 100,
+      signal_quality: 100,
+      temperature: -1,
+      stream_resolution: '',
+      stream_fps: 0,
+      stream_bitrate: 0,
+      network_type: '',
+      ip_address: '',
+      tally_state: 'off'
+    });
     saveMemBackup();
   } else if (sql.includes('UPDATE devices SET is_online')) {
     const d = memDB.devices.find(x => x.id === params[9] || x.id === params[0]);
-    if (d) { d.is_online = params[0] === 1 ? 1 : 0; }
+    if (d) {
+      d.is_online = params[0] === 1 ? 1 : 0;
+      if (params.length > 2) {
+        d.battery_percent = params[1];
+        d.signal_quality = params[2];
+        d.temperature = params[3];
+        d.stream_resolution = params[4];
+        d.stream_fps = params[5];
+        d.stream_bitrate = params[6];
+        d.network_type = params[7];
+        d.ip_address = params[8];
+      }
+    }
+    saveMemBackup();
+  } else if (sql.includes('UPDATE devices SET name')) {
+    const d = memDB.devices.find(x => x.id === params[3]);
+    if (d) {
+      d.name = params[0];
+      d.label = params[1];
+      d.group_name = params[2];
+    }
+    saveMemBackup();
+  } else if (sql.includes('UPDATE devices SET tally_state')) {
+    const d = memDB.devices.find(x => x.id === params[1]);
+    if (d) {
+      d.tally_state = params[0];
+    }
+    saveMemBackup();
+  } else if (sql.includes('DELETE FROM devices')) {
+    memDB.devices = memDB.devices.filter(x => x.id !== params[0]);
     saveMemBackup();
   } else if (sql.includes('INSERT INTO events')) {
     memDB.events.push({ id: params[0], title: params[1], description: params[2], status: params[3] });
@@ -146,6 +216,38 @@ function mockDbRun(sql, params) {
     if (a) { a.name = params[0]; a.ip = params[1]; a.auto_reconnect = params[2]; }
   } else if (sql.includes('DELETE FROM atem_connections')) {
     memDB.atem = memDB.atem.filter(a => a.id !== params[0]);
+  } else if (sql.includes('INSERT INTO device_tags')) {
+    if (!memDB.tags) memDB.tags = [];
+    if (!memDB.tags.some(t => t.device_id === params[0] && t.tag === params[1])) {
+      memDB.tags.push({ device_id: params[0], tag: params[1] });
+    }
+  } else if (sql.includes('DELETE FROM device_tags')) {
+    if (!memDB.tags) memDB.tags = [];
+    memDB.tags = memDB.tags.filter(t => !(t.device_id === params[0] && t.tag === params[1]));
+  } else if (sql.includes('INSERT INTO production_logs')) {
+    if (!memDB.logs) memDB.logs = [];
+    memDB.logs.push({
+      id: params[0] || Date.now().toString(),
+      event_id: params[1] || null,
+      category: params[2] || 'system',
+      source: params[3] || 'system',
+      message: params[4] || '',
+      metadata: params[5] || '{}',
+      created_at: new Date().toISOString()
+    });
+    // Keep only last 200 logs in memory
+    if (memDB.logs.length > 200) memDB.logs = memDB.logs.slice(-200);
+  } else if (sql.includes('INSERT INTO users')) {
+    if (!memDB.users) memDB.users = [];
+    memDB.users.push({
+      id: params[0], username: params[1], password_hash: params[2],
+      display_name: params[3], role: params[4], created_at: new Date().toISOString()
+    });
+  } else if (sql.includes('DELETE FROM users')) {
+    if (!memDB.users) memDB.users = [];
+    memDB.users = memDB.users.filter(u => u.id !== params[0]);
+  } else if (sql.includes('INSERT INTO device_snapshots')) {
+    // Snapshots are transient telemetry — no need to persist in offline mode
   }
 }
 

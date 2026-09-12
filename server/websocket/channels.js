@@ -121,9 +121,15 @@ function setupWebSocketChannels(io) {
       signalingNs.to(targetId).emit('ice-candidate', { fromId: socket.id, candidate, streamId });
     });
     socket.on('join-room', ({ roomId }) => {
-      socket.join(roomId);
+      // Check if already in this room — if so, skip to avoid redundant peer-joined/room-peers events
       const room = signalingNs.adapter.rooms.get(roomId);
-      const otherPeers = room ? Array.from(room).filter(id => id !== socket.id) : [];
+      if (room && room.has(socket.id)) {
+        // Already in the room — no need to re-join or re-notify
+        return;
+      }
+      socket.join(roomId);
+      const updatedRoom = signalingNs.adapter.rooms.get(roomId);
+      const otherPeers = updatedRoom ? Array.from(updatedRoom).filter(id => id !== socket.id) : [];
       // Notify other peers in room that a new peer joined
       socket.to(roomId).emit('peer-joined', { peerId: socket.id, roomId });
       // Also notify this newly joined peer about existing peers in the room

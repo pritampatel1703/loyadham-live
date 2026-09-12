@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 
@@ -23,11 +24,9 @@ const ALLOWED_ORIGINS = process.env.CLIENT_URL
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json({ limit: '10mb' }));
 
-
-
-// Serve static client build in production
-if (process.env.NODE_ENV === 'production') {
-  const clientDist = path.join(__dirname, '..', 'client', 'dist');
+// Serve static client build if dist exists (works in production or standalone)
+const clientDist = path.join(__dirname, '..', 'client', 'dist');
+if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
 }
 
@@ -79,9 +78,8 @@ const { initDatabase } = require('./db/database');
   const { setupRtmpServer } = require('./rtmp/rtmpServer');
   setupRtmpServer(io);
 
-  // SPA fallback — serve index.html for client-side routing in production
-  if (process.env.NODE_ENV === 'production') {
-    const clientDist = path.join(__dirname, '..', 'client', 'dist');
+  // SPA fallback — serve index.html for client-side routing (Production, Output, Camera, etc.)
+  if (fs.existsSync(clientDist)) {
     app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
   }
 
