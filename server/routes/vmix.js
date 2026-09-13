@@ -40,53 +40,146 @@ router.post('/:id/action', authenticate, requireRole('operator'), async (req, re
   const v = await getVmix(req.params.id);
   if (!v) return res.status(404).json({ error: 'Not found' });
   const { action, params } = req.body;
+  const p = params || {};
   const actions = {
-    // Production
-    cut: () => v.cut(), fade: () => v.fade(params?.duration), transition: () => v.transition(params?.number),
-    setPreview: () => v.setPreview(params?.input), setProgram: () => v.setProgram(params?.input),
-    quickPlay: () => v.quickPlay(params?.input),
-    // Inputs
-    addInput: () => v.addInput(params?.type||'Video', params?.path), removeInput: () => v.removeInput(params?.input),
-    renameInput: () => v.renameInput(params?.input, params?.name),
-    // Overlays
-    overlayOn: () => v.overlayOn(params?.number||1, params?.input), overlayOff: () => v.overlayOff(params?.number||1),
-    overlayToggle: () => v.overlayToggle(params?.number||1, params?.input), overlayZoom: () => v.overlayZoom(params?.number||1),
-    // Fullscreen
-    fullscreen: () => v.fullscreen(params?.input), fullscreenOff: () => v.fullscreenOff(),
-    // Recording & Streaming
+    // ═══ RAW ═══
+    raw: () => v.raw(p.functionName, p.rawParams || {}),
+    // ═══ PRODUCTION / SWITCHING ═══
+    cut: () => v.cut(), fade: () => v.fade(p.duration), zoom: () => v.zoom(p.duration),
+    wipe: () => v.wipe(p.duration), slide: () => v.slide(p.duration), fly: () => v.fly(p.duration),
+    crossZoom: () => v.crossZoom(p.duration), flyRotate: () => v.flyRotate(p.duration),
+    cube: () => v.cube(p.duration), cubeZoom: () => v.cubeZoom(p.duration),
+    verticalWipe: () => v.verticalWipe(p.duration), verticalSlide: () => v.verticalSlide(p.duration),
+    merge: () => v.merge(p.duration), wipeReverse: () => v.wipeReverse(p.duration),
+    slideReverse: () => v.slideReverse(p.duration),
+    verticalWipeReverse: () => v.verticalWipeReverse(p.duration), verticalSlideReverse: () => v.verticalSlideReverse(p.duration),
+    transition: () => v.transition(p.number), stinger: () => v.stinger(p.number),
+    setPreview: () => v.setPreview(p.input), setProgram: () => v.setProgram(p.input),
+    quickPlay: () => v.quickPlay(p.input),
+    // ═══ INPUTS ═══
+    addInput: () => v.addInput(p.type||'Video', p.path), removeInput: () => v.removeInput(p.input),
+    renameInput: () => v.renameInput(p.input, p.name), moveInput: () => v.moveInput(p.input, p.value),
+    setInputFile: () => v.setInputFile(p.input, p.value),
+    // ═══ OVERLAYS ═══
+    overlayOn: () => v.overlayOn(p.number||1, p.input), overlayOff: () => v.overlayOff(p.number||1),
+    overlayToggle: () => v.overlayToggle(p.number||1, p.input), overlayZoom: () => v.overlayZoom(p.number||1),
+    setOverlayPosition: () => v.setOverlayPosition(p.number||1, p.x, p.y),
+    // ═══ FTB & FADER ═══
+    fadeToBlack: () => v.fadeToBlack(), setFader: () => v.setFader(p.value),
+    // ═══ FULLSCREEN ═══
+    fullscreen: () => v.fullscreen(p.input), fullscreenOff: () => v.fullscreenOff(),
+    // ═══ RECORD / STREAM / OUTPUT ═══
     startRecording: () => v.startRecording(), stopRecording: () => v.stopRecording(),
     startStreaming: () => v.startStreaming(), stopStreaming: () => v.stopStreaming(),
-    startStream: () => v.startStream(params?.number), stopStream: () => v.stopStream(params?.number),
-    snapshot: () => v.snapshot(params?.input), snapshotInput: () => v.snapshotInput(params?.input),
-    // Audio
-    mute: () => v.muteInput(params?.input), unmute: () => v.unmuteInput(params?.input),
-    toggleAudio: () => v.toggleAudio(params?.input),
-    setVolume: () => v.setVolume(params?.input, params?.volume),
-    setBalance: () => v.setBalance(params?.input, params?.value),
-    soloOn: () => v.soloOn(params?.input), soloOff: () => v.soloOff(params?.input), soloToggle: () => v.soloToggle(params?.input),
-    audioAutoOn: () => v.audioAutoOn(params?.input), audioAutoOff: () => v.audioAutoOff(params?.input),
-    audioBusOn: () => v.audioBusOn(params?.input, params?.bus), audioBusOff: () => v.audioBusOff(params?.input, params?.bus),
-    masterAudioOn: () => v.masterAudioOn(), masterAudioOff: () => v.masterAudioOff(),
-    setMasterVolume: () => v.setMasterVolume(params?.volume), setBusVolume: () => v.setBusVolume(params?.bus, params?.volume),
-    // Playback
-    play: () => v.playInput(params?.input), pause: () => v.pauseInput(params?.input),
-    restart: () => v.restartInput(params?.input),
-    loopOn: () => v.loopOn(params?.input), loopOff: () => v.loopOff(params?.input),
-    setPosition: () => v.setPosition(params?.input, params?.value), setRate: () => v.setRate(params?.input, params?.rate),
-    // FTB & T-Bar
-    fadeToBlack: () => v.fadeToBlack(), setFader: () => v.setFader(params?.value),
-    // Replay
-    replayPlay: () => v.replayPlay(), replayPause: () => v.replayPause(),
+    startStream: () => v.startStream(p.number), stopStream: () => v.stopStream(p.number),
+    startExternal: () => v.startExternal(), stopExternal: () => v.stopExternal(),
+    startMultiCorder: () => v.startMultiCorder(), stopMultiCorder: () => v.stopMultiCorder(),
+    snapshot: () => v.snapshot(p.input), snapshotInput: () => v.snapshotInput(p.input),
+    // ═══ AUDIO — INPUT ═══
+    mute: () => v.muteInput(p.input), unmute: () => v.unmuteInput(p.input),
+    toggleAudio: () => v.toggleAudio(p.input),
+    setVolume: () => v.setVolume(p.input, p.volume),
+    setBalance: () => v.setBalance(p.input, p.value),
+    soloOn: () => v.soloOn(p.input), soloOff: () => v.soloOff(p.input), soloToggle: () => v.soloToggle(p.input),
+    audioAutoOn: () => v.audioAutoOn(p.input), audioAutoOff: () => v.audioAutoOff(p.input),
+    audioPluginOn: () => v.audioPluginOn(p.input, p.pluginNum), audioPluginOff: () => v.audioPluginOff(p.input, p.pluginNum),
+    audioPluginToggle: () => v.audioPluginToggle(p.input, p.pluginNum),
+    audioChannelMatrixPreset: () => v.audioChannelMatrixPreset(p.input, p.preset),
+    // ═══ AUDIO — BUS ═══
+    audioBusOn: () => v.audioBusOn(p.input, p.bus), audioBusOff: () => v.audioBusOff(p.input, p.bus),
+    audioBusToggle: () => v.audioBusToggle(p.input, p.bus),
+    // ═══ AUDIO — MASTER/BUS VOLUME ═══
+    masterAudioOn: () => v.masterAudioOn(), masterAudioOff: () => v.masterAudioOff(), masterAudioToggle: () => v.masterAudioToggle(),
+    setMasterVolume: () => v.setMasterVolume(p.volume),
+    busAudioOn: () => v.busAudioOn(p.bus), busAudioOff: () => v.busAudioOff(p.bus), busAudioToggle: () => v.busAudioToggle(p.bus),
+    setBusVolume: () => v.setBusVolume(p.bus, p.volume),
+    busSendToMaster: () => v.busSendToMaster(p.bus),
+    busSendToMasterOn: () => v.busSendToMasterOn(p.bus), busSendToMasterOff: () => v.busSendToMasterOff(p.bus),
+    // ═══ PLAYBACK ═══
+    play: () => v.playInput(p.input), pause: () => v.pauseInput(p.input), playPause: () => v.playPause(p.input),
+    restart: () => v.restartInput(p.input),
+    loopOn: () => v.loopOn(p.input), loopOff: () => v.loopOff(p.input),
+    setPosition: () => v.setPosition(p.input, p.value), setRate: () => v.setRate(p.input, p.rate),
+    nextPicture: () => v.nextPicture(p.input), previousPicture: () => v.previousPicture(p.input),
+    selectIndex: () => v.selectIndex(p.input, p.value),
+    // ═══ REPLAY ═══
+    replayPlay: () => v.replayPlay(), replayPause: () => v.replayPause(), replayPlayPause: () => v.replayPlayPause(),
     replayMoveLastEvent: () => v.replayMoveLastEvent(),
-    replayFastForward: () => v.replayFastForward(params?.speed), replayFastBackward: () => v.replayFastBackward(params?.speed),
+    replayFastForward: () => v.replayFastForward(p.speed), replayFastBackward: () => v.replayFastBackward(p.speed),
     replayJumpToNow: () => v.replayJumpToNow(), replayMarkIn: () => v.replayMarkIn(), replayMarkOut: () => v.replayMarkOut(),
-    // Titles
-    setTitle: () => v.setTitle(params?.input, params?.index, params?.value),
-    selectTitlePreset: () => v.selectTitlePreset(params?.input, params?.index),
+    replayMarkInOut: () => v.replayMarkInOut(), replayLive: () => v.replayLive(),
+    replayShowHide: () => v.replayShowHide(), replayChangeDirection: () => v.replayChangeDirection(),
+    replayChangeSpeed: () => v.replayChangeSpeed(p.speed),
+    replaySelectEvents: () => v.replaySelectEvents(p.value),
+    // ═══ PTZ ═══
+    ptzMoveUp: () => v.ptzMoveUp(p.input, p.speed), ptzMoveDown: () => v.ptzMoveDown(p.input, p.speed),
+    ptzMoveLeft: () => v.ptzMoveLeft(p.input, p.speed), ptzMoveRight: () => v.ptzMoveRight(p.input, p.speed),
+    ptzMoveStop: () => v.ptzMoveStop(p.input),
+    ptzMoveUpLeft: () => v.ptzMoveUpLeft(p.input), ptzMoveUpRight: () => v.ptzMoveUpRight(p.input),
+    ptzMoveDownLeft: () => v.ptzMoveDownLeft(p.input), ptzMoveDownRight: () => v.ptzMoveDownRight(p.input),
+    ptzZoomIn: () => v.ptzZoomIn(p.input, p.speed), ptzZoomOut: () => v.ptzZoomOut(p.input, p.speed),
+    ptzZoomStop: () => v.ptzZoomStop(p.input), ptzHome: () => v.ptzHome(p.input),
+    ptzFocusAuto: () => v.ptzFocusAuto(p.input), ptzFocusNear: () => v.ptzFocusNear(p.input),
+    ptzFocusFar: () => v.ptzFocusFar(p.input), ptzFocusStop: () => v.ptzFocusStop(p.input),
+    ptzMoveToPreset: () => v.ptzMoveToPreset(p.input, p.preset), ptzSavePreset: () => v.ptzSavePreset(p.input, p.preset),
+    // ═══ COLOR CORRECTION ═══
+    setSaturation: () => v.setSaturation(p.input, p.value), setHue: () => v.setHue(p.input, p.value),
+    setGamma: () => v.setGamma(p.input, p.value), setGain: () => v.setGain(p.input, p.value),
+    setLift: () => v.setLift(p.input, p.value), setContrast: () => v.setContrast(p.input, p.value),
+    setBrightness: () => v.setBrightness(p.input, p.value),
+    colorCorrectionAuto: () => v.colorCorrectionAuto(p.input), colorCorrectionReset: () => v.colorCorrectionReset(p.input),
+    // ═══ POSITION / CROP ═══
+    setPanX: () => v.setPanX(p.input, p.value), setPanY: () => v.setPanY(p.input, p.value),
+    setZoom: () => v.setZoom(p.input, p.value),
+    setCropX1: () => v.setCropX1(p.input, p.value), setCropY1: () => v.setCropY1(p.input, p.value),
+    setCropX2: () => v.setCropX2(p.input, p.value), setCropY2: () => v.setCropY2(p.input, p.value),
+    setAlpha: () => v.setAlpha(p.input, p.value),
+    resetInput: () => v.resetInput(p.input),
+    // ═══ EFFECTS / CHROMA ═══
+    setInputEffect: () => v.setInputEffect(p.input, p.value),
+    inputEffectOn: () => v.inputEffectOn(p.input), inputEffectOff: () => v.inputEffectOff(p.input),
+    // ═══ COUNTDOWN ═══
+    startCountdown: () => v.startCountdown(p.input), stopCountdown: () => v.stopCountdown(p.input),
+    pauseCountdown: () => v.pauseCountdown(p.input),
+    setCountdown: () => v.setCountdown(p.input, p.value), changeCountdown: () => v.changeCountdown(p.input, p.value),
+    // ═══ BROWSER ═══
+    browserNavigate: () => v.browserNavigate(p.input, p.url), browserReload: () => v.browserReload(p.input),
+    browserBack: () => v.browserBack(p.input), browserForward: () => v.browserForward(p.input),
+    browserKeyboardEnabled: () => v.browserKeyboardEnabled(p.input), browserKeyboardDisabled: () => v.browserKeyboardDisabled(p.input),
+    browserMouseEnabled: () => v.browserMouseEnabled(p.input), browserMouseDisabled: () => v.browserMouseDisabled(p.input),
+    // ═══ NDI ═══
+    ndiSelectSource: () => v.ndiSelectSource(p.input, p.sourceName),
+    ndiStartRecording: () => v.ndiStartRecording(p.input), ndiStopRecording: () => v.ndiStopRecording(p.input),
+    ndiCommand: () => v.ndiCommand(p.input, p.value),
+    // ═══ TITLES / TEXT ═══
+    setText: () => v.setText(p.input, p.index, p.value),
+    setTextByName: () => v.setTextByName(p.input, p.name, p.value),
+    selectTitlePreset: () => v.selectTitlePreset(p.input, p.value),
+    nextTitlePreset: () => v.nextTitlePreset(p.input), previousTitlePreset: () => v.previousTitlePreset(p.input),
+    setImage: () => v.setImage(p.input, p.index, p.value),
+    // ═══ DATA SOURCES ═══
+    dataSourceNextRow: () => v.dataSourceNextRow(p.input, p.value),
+    dataSourcePreviousRow: () => v.dataSourcePreviousRow(p.input, p.value),
+    dataSourceFirstRow: () => v.dataSourceFirstRow(p.input, p.value),
+    dataSourceLastRow: () => v.dataSourceLastRow(p.input, p.value),
+    dataSourceSelectRow: () => v.dataSourceSelectRow(p.input, p.value, p.row),
+    dataSourceAutoNext: () => v.dataSourceAutoNext(p.input, p.value),
+    dataSourceAutoNextOff: () => v.dataSourceAutoNextOff(p.input, p.value),
+    // ═══ LAYERS ═══
+    setLayer: () => v.setLayer(p.input, p.layer, p.source), layerOff: () => v.layerOff(p.input, p.layer),
+    setMultiViewOverlay: () => v.setMultiViewOverlay(p.input),
+    // ═══ SCRIPTING ═══
+    scriptStart: () => v.scriptStart(p.name), scriptStop: () => v.scriptStop(p.name), scriptStopAll: () => v.scriptStopAll(),
+    // ═══ DYNAMIC VALUES ═══
+    setDynamicValue: () => v.setDynamicValue(p.number, p.value),
+    // ═══ VIDEO DELAY ═══
+    setVideoDelay: () => v.setVideoDelay(p.input, p.frames),
+    // ═══ MISC ═══
+    undo: () => v.undo(), activatorRefresh: () => v.activatorRefresh(), keyPress: () => v.keyPress(p.value),
   };
   if (!actions[action]) return res.status(400).json({ error: `Unknown action: ${action}` });
   const result = await actions[action]();
-  await helpers.addLog(null, 'vmix', req.user.username, `vMix: ${action}`, JSON.stringify(params||{}));
+  await helpers.addLog(null, 'vmix', req.user.username, `vMix: ${action}`, JSON.stringify(p));
   res.json(result);
 });
 
