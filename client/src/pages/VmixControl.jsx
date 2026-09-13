@@ -25,6 +25,8 @@ export default function VmixControl() {
   const [overlayOn, setOverlayOn] = useState({ 1:false, 2:false, 3:false, 4:false });
   // PTZ
   const [ptzInput, setPtzInput] = useState('');
+  const [ptzSpeed, setPtzSpeed] = useState(2);
+  const [ptzMode, setPtzMode] = useState('motor'); // 'motor' or 'virtual'
   // Color
   const [ccInput, setCcInput] = useState('');
   const [cc, setCc] = useState({ saturation:100, hue:0, gamma:0, gain:0, lift:0, contrast:0, brightness:0, alpha:255 });
@@ -72,12 +74,65 @@ export default function VmixControl() {
   const inputs = status?.inputs || [];
   const conn = conns.find(c => c.id === active);
 
+  // Auto-select active/preview input when status updates
+  useEffect(() => {
+    if (status?.inputs?.length) {
+      const def = status.activeInput || status.previewInput || status.inputs[0]?.number || 1;
+      setPtzInput(curr => curr || def);
+      setCcInput(curr => curr || def);
+      setPosInput(curr => curr || def);
+    }
+  }, [status]);
+
   // Reusable input selector
   const ISel = ({ val, set, label }) => (
-    <select className="vc-select" value={val} onChange={e => set(e.target.value)}>
+    <select className="vc-select" value={val || ''} onChange={e => set(e.target.value)}>
       <option value="">{label || 'Select Input...'}</option>
-      {inputs.map(i => <option key={i.number} value={i.number}>#{i.number} {i.title?.substring(0,16)}</option>)}
+      {inputs.map(i => <option key={i.number} value={i.number}>#{i.number} {i.title?.substring(0,18)}</option>)}
     </select>
+  );
+
+  // Quick camera selector bar for Camera & Color tabs
+  const CamTargetBar = ({ currentInput, setInput }) => (
+    <div className="vc-cam-target-bar">
+      <div className="vc-cam-target-info">
+        <span className="vc-cam-target-title">🎯 Target Input:</span>
+        <span className="vc-cam-target-badge">
+          {currentInput ? `#${currentInput} — ${inputs.find(i => String(i.number) === String(currentInput))?.title?.substring(0, 22) || 'Input ' + currentInput}` : 'No Input Selected'}
+        </span>
+      </div>
+      <div className="vc-cam-target-btns">
+        <button
+          type="button"
+          className={`vc-quick-cam-btn pgm ${String(currentInput) === String(status?.activeInput) ? 'active' : ''}`}
+          onClick={() => status?.activeInput && setInput(status.activeInput)}
+          title="Target current Program output"
+        >
+          🔴 PGM (#{status?.activeInput || '-'})
+        </button>
+        <button
+          type="button"
+          className={`vc-quick-cam-btn pvw ${String(currentInput) === String(status?.previewInput) ? 'active' : ''}`}
+          onClick={() => status?.previewInput && setInput(status.previewInput)}
+          title="Target current Preview output"
+        >
+          🟢 PVW (#{status?.previewInput || '-'})
+        </button>
+        <select
+          className="vc-select"
+          value={currentInput || ''}
+          onChange={e => setInput(e.target.value)}
+          style={{ minWidth: 160 }}
+        >
+          <option value="">Choose Input...</option>
+          {inputs.map(i => (
+            <option key={i.number} value={i.number}>
+              #{i.number} {i.title?.substring(0, 20)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
   );
 
   return (
@@ -236,88 +291,522 @@ export default function VmixControl() {
           {/* ═══ CAMERA & COLOR ═══ */}
           {tab === 'camera' && <>
             <div className="vc-sub-tabs">
-              {[{k:'ptz',l:'🎥 PTZ Control'},{k:'color',l:'🎨 Color Correction'},{k:'position',l:'📐 Position & Crop'}].map(t => (
+              {[
+                { k: 'ptz', l: '🎥 PTZ Camera Control' },
+                { k: 'color', l: '🎨 Color Correction' },
+                { k: 'position', l: '📐 Position & Zoom' }
+              ].map(t => (
                 <button key={t.k} className={`vc-sub-tab ${cameraSub===t.k?'active':''}`} onClick={() => setCameraSub(t.k)}>{t.l}</button>
               ))}
             </div>
 
+            {/* ─── PTZ SUB-TAB ─── */}
             {cameraSub === 'ptz' && (
-              <div className="vc-ptz">
-                <div className="vc-ptz-left">
-                  <div className="vc-field-label">Camera Input</div>
-                  <ISel val={ptzInput} set={setPtzInput} label="Select Camera..." />
-                  <div className="vc-field-label" style={{marginTop:16}}>Presets</div>
-                  <div className="vc-ptz-presets">
-                    {[1,2,3,4,5,6,7,8].map(n => (
-                      <div key={n} className="vc-ptz-preset">
-                        <button className="vc-ptz-preset-go" onClick={() => act('ptzMoveToPreset',{input:ptzInput,preset:n})}>P{n}</button>
-                        <button className="vc-ptz-preset-save" onClick={() => act('ptzSavePreset',{input:ptzInput,preset:n})}>💾</button>
-                      </div>
+              <div className="vc-cam-panel">
+                <CamTargetBar currentInput={ptzInput} setInput={setPtzInput} />
+
+                {/* Mode & Speed Bar */}
+                <div className="vc-ptz-topbar">
+                  <div className="vc-ptz-mode-select">
+                    <span className="vc-field-label">Control Mode:</span>
+                    <button
+                      type="button"
+                      className={`vc-mode-pill ${ptzMode==='motor'?'active':''}`}
+                      onClick={() => setPtzMode('motor')}
+                    >
+                      🎮 Motorized PTZ (vMix/Visca)
+                    </button>
+                    <button
+                      type="button"
+                      className={`vc-mode-pill ${ptzMode==='virtual'?'active':''}`}
+                      onClick={() => setPtzMode('virtual')}
+                    >
+                      📐 Virtual PTZ (Pan/Zoom for Any Camera)
+                    </button>
+                  </div>
+                  <div className="vc-ptz-speed-select">
+                    <span className="vc-field-label">Speed:</span>
+                    {[1, 2, 3, 4, 5].map(s => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`vc-speed-pill ${ptzSpeed===s?'active':''}`}
+                        onClick={() => setPtzSpeed(s)}
+                      >
+                        {s}x
+                      </button>
                     ))}
                   </div>
                 </div>
-                <div className="vc-ptz-right">
-                  <div className="vc-ptz-pad">
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveUpLeft',{input:ptzInput})}>↖</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveUp',{input:ptzInput,speed:1})}>⬆</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveUpRight',{input:ptzInput})}>↗</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveLeft',{input:ptzInput,speed:1})}>⬅</button>
-                    <button className="vc-ptz-btn stop" onClick={() => act('ptzMoveStop',{input:ptzInput})}>⏹</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveRight',{input:ptzInput,speed:1})}>➡</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveDownLeft',{input:ptzInput})}>↙</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveDown',{input:ptzInput,speed:1})}>⬇</button>
-                    <button className="vc-ptz-btn" onClick={() => act('ptzMoveDownRight',{input:ptzInput})}>↘</button>
+
+                <div className="vc-ptz-grid">
+                  {/* Directional Pad */}
+                  <div className="vc-ptz-block">
+                    <div className="vc-field-label">Pan / Tilt Pad (Hold or Click)</div>
+                    <div className="vc-ptz-pad">
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveUpLeft',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nx = Math.max(-100, p.panX - 5 * ptzSpeed);
+                              const ny = Math.min(100, p.panY + 5 * ptzSpeed);
+                              act('setPanX',{input:ptzInput,value:(nx/100).toFixed(2)});
+                              act('setPanY',{input:ptzInput,value:(ny/100).toFixed(2)});
+                              return { ...p, panX: nx, panY: ny };
+                            });
+                          } else {
+                            act('ptzMoveUpLeft',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Up-Left"
+                      >↖</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveUp',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const ny = Math.min(100, p.panY + 5 * ptzSpeed);
+                              act('setPanY',{input:ptzInput,value:(ny/100).toFixed(2)});
+                              return { ...p, panY: ny };
+                            });
+                          } else {
+                            act('ptzMoveUp',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Tilt Up"
+                      >⬆</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveUpRight',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nx = Math.min(100, p.panX + 5 * ptzSpeed);
+                              const ny = Math.min(100, p.panY + 5 * ptzSpeed);
+                              act('setPanX',{input:ptzInput,value:(nx/100).toFixed(2)});
+                              act('setPanY',{input:ptzInput,value:(ny/100).toFixed(2)});
+                              return { ...p, panX: nx, panY: ny };
+                            });
+                          } else {
+                            act('ptzMoveUpRight',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Up-Right"
+                      >↗</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveLeft',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nx = Math.max(-100, p.panX - 5 * ptzSpeed);
+                              act('setPanX',{input:ptzInput,value:(nx/100).toFixed(2)});
+                              return { ...p, panX: nx };
+                            });
+                          } else {
+                            act('ptzMoveLeft',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Pan Left"
+                      >⬅</button>
+                      <button
+                        className="vc-ptz-btn stop"
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => ({ ...p, panX: 0, panY: 0 }));
+                            act('setPanX',{input:ptzInput,value:'0'});
+                            act('setPanY',{input:ptzInput,value:'0'});
+                          } else {
+                            act('ptzMoveStop',{input:ptzInput});
+                          }
+                        }}
+                        title={ptzMode==='virtual' ? 'Center Pan/Tilt' : 'Stop Movement'}
+                      >⏹</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveRight',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nx = Math.min(100, p.panX + 5 * ptzSpeed);
+                              act('setPanX',{input:ptzInput,value:(nx/100).toFixed(2)});
+                              return { ...p, panX: nx };
+                            });
+                          } else {
+                            act('ptzMoveRight',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Pan Right"
+                      >➡</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveDownLeft',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nx = Math.max(-100, p.panX - 5 * ptzSpeed);
+                              const ny = Math.max(-100, p.panY - 5 * ptzSpeed);
+                              act('setPanX',{input:ptzInput,value:(nx/100).toFixed(2)});
+                              act('setPanY',{input:ptzInput,value:(ny/100).toFixed(2)});
+                              return { ...p, panX: nx, panY: ny };
+                            });
+                          } else {
+                            act('ptzMoveDownLeft',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Down-Left"
+                      >↙</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveDown',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const ny = Math.max(-100, p.panY - 5 * ptzSpeed);
+                              act('setPanY',{input:ptzInput,value:(ny/100).toFixed(2)});
+                              return { ...p, panY: ny };
+                            });
+                          } else {
+                            act('ptzMoveDown',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Tilt Down"
+                      >⬇</button>
+                      <button
+                        className="vc-ptz-btn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzMoveDownRight',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzMoveStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nx = Math.min(100, p.panX + 5 * ptzSpeed);
+                              const ny = Math.max(-100, p.panY - 5 * ptzSpeed);
+                              act('setPanX',{input:ptzInput,value:(nx/100).toFixed(2)});
+                              act('setPanY',{input:ptzInput,value:(ny/100).toFixed(2)});
+                              return { ...p, panX: nx, panY: ny };
+                            });
+                          } else {
+                            act('ptzMoveDownRight',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzMoveStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                        title="Down-Right"
+                      >↘</button>
+                    </div>
+
+                    {/* Zoom & Focus */}
+                    <div className="vc-field-label">Zoom & Focus</div>
+                    <div className="vc-ptz-zoom">
+                      <button
+                        className="vc-ptz-zbtn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzZoomIn',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzZoomStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nz = Math.min(300, p.zoom + 10 * ptzSpeed);
+                              act('setZoom',{input:ptzInput,value:(nz/100).toFixed(2)});
+                              return { ...p, zoom: nz };
+                            });
+                          } else {
+                            act('ptzZoomIn',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzZoomStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                      >🔍 + Zoom In</button>
+                      <button className="vc-ptz-zbtn" onClick={() => { if(ptzMode==='motor') act('ptzZoomStop',{input:ptzInput}); }}>⏹ Stop</button>
+                      <button
+                        className="vc-ptz-zbtn"
+                        onMouseDown={() => { if(ptzMode==='motor') act('ptzZoomOut',{input:ptzInput,speed:ptzSpeed}); }}
+                        onMouseUp={() => { if(ptzMode==='motor') act('ptzZoomStop',{input:ptzInput}); }}
+                        onClick={() => {
+                          if (ptzMode==='virtual') {
+                            setPos(p => {
+                              const nz = Math.max(10, p.zoom - 10 * ptzSpeed);
+                              act('setZoom',{input:ptzInput,value:(nz/100).toFixed(2)});
+                              return { ...p, zoom: nz };
+                            });
+                          } else {
+                            act('ptzZoomOut',{input:ptzInput,speed:ptzSpeed});
+                            setTimeout(() => act('ptzZoomStop',{input:ptzInput}), 350);
+                          }
+                        }}
+                      >🔍 − Zoom Out</button>
+                    </div>
+
+                    <div className="vc-ptz-focus">
+                      <button className="vc-ptz-fbtn" onClick={() => act('ptzFocusNear',{input:ptzInput})}>Near</button>
+                      <button className="vc-ptz-fbtn auto" onClick={() => act('ptzFocusAuto',{input:ptzInput})}>Auto Focus</button>
+                      <button className="vc-ptz-fbtn" onClick={() => act('ptzFocusFar',{input:ptzInput})}>Far</button>
+                      <button className="vc-ptz-fbtn" onClick={() => act('ptzFocusStop',{input:ptzInput})}>Stop</button>
+                    </div>
+                    <button
+                      className="vc-ptz-home"
+                      onClick={() => {
+                        if (ptzMode==='virtual') {
+                          setPos(p => ({ ...p, panX: 0, panY: 0, zoom: 100 }));
+                          act('setPanX',{input:ptzInput,value:'0'});
+                          act('setPanY',{input:ptzInput,value:'0'});
+                          act('setZoom',{input:ptzInput,value:'1'});
+                        } else {
+                          act('ptzHome',{input:ptzInput});
+                        }
+                      }}
+                    >
+                      🏠 Reset to Home Position
+                    </button>
                   </div>
-                  <div className="vc-ptz-zoom">
-                    <button className="vc-ptz-zbtn" onClick={() => act('ptzZoomIn',{input:ptzInput,speed:1})}>🔍 +</button>
-                    <button className="vc-ptz-zbtn" onClick={() => act('ptzZoomStop',{input:ptzInput})}>⏹</button>
-                    <button className="vc-ptz-zbtn" onClick={() => act('ptzZoomOut',{input:ptzInput,speed:1})}>🔍 −</button>
+
+                  {/* Presets */}
+                  <div className="vc-ptz-block presets">
+                    <div className="vc-field-label">Camera Presets (P1 - P8)</div>
+                    <div className="vc-ptz-presets">
+                      {[1,2,3,4,5,6,7,8].map(n => (
+                        <div key={n} className="vc-ptz-preset">
+                          <button
+                            className="vc-ptz-preset-go"
+                            onClick={() => act('ptzMoveToPreset',{input:ptzInput,preset:n})}
+                            title={`Move to Preset ${n}`}
+                          >
+                            P{n}
+                          </button>
+                          <button
+                            className="vc-ptz-preset-save"
+                            onClick={() => act('ptzSavePreset',{input:ptzInput,preset:n})}
+                            title={`Save current position to Preset ${n}`}
+                          >
+                            💾 Save
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="vc-ptz-focus">
-                    <button className="vc-ptz-fbtn" onClick={() => act('ptzFocusNear',{input:ptzInput})}>Near</button>
-                    <button className="vc-ptz-fbtn auto" onClick={() => act('ptzFocusAuto',{input:ptzInput})}>Auto Focus</button>
-                    <button className="vc-ptz-fbtn" onClick={() => act('ptzFocusFar',{input:ptzInput})}>Far</button>
-                  </div>
-                  <button className="vc-ptz-home" onClick={() => act('ptzHome',{input:ptzInput})}>🏠 Home Position</button>
                 </div>
               </div>
             )}
 
+            {/* ─── COLOR CORRECTION SUB-TAB ─── */}
             {cameraSub === 'color' && (
-              <div className="vc-color">
-                <div className="vc-color-top">
-                  <ISel val={ccInput} set={setCcInput} label="Select Input..." />
-                  <button className="vc-color-btn" onClick={() => act('colorCorrectionAuto',{input:ccInput})}>🎨 Auto</button>
-                  <button className="vc-color-btn" onClick={() => act('colorCorrectionReset',{input:ccInput})}>↩ Reset</button>
+              <div className="vc-cam-panel">
+                <CamTargetBar currentInput={ccInput} setInput={setCcInput} />
+
+                {/* Top Action Bar */}
+                <div className="vc-color-actions">
+                  <div className="vc-preset-chips">
+                    <span className="vc-field-label" style={{alignSelf:'center',margin:0}}>Looks:</span>
+                    {[
+                      { l: 'Standard', cc: { saturation: 100, hue: 0, lift: 0, gamma: 0, gain: 0 } },
+                      { l: 'Vivid', cc: { saturation: 135, hue: 0, lift: 0, gamma: 0, gain: 10 } },
+                      { l: 'Warm', cc: { saturation: 110, hue: 15, lift: 0, gamma: 0, gain: 8 } },
+                      { l: 'Cool', cc: { saturation: 105, hue: -15, lift: -5, gamma: 0, gain: 0 } },
+                      { l: 'Cinematic', cc: { saturation: 115, hue: 0, lift: 8, gamma: -8, gain: 12 } },
+                      { l: 'B&W', cc: { saturation: 0, hue: 0, lift: 0, gamma: 0, gain: 0 } },
+                    ].map(p => (
+                      <button
+                        key={p.l}
+                        type="button"
+                        className="vc-preset-chip"
+                        onClick={() => {
+                          const inp = ccInput || status?.activeInput || inputs[0]?.number;
+                          if (!inp) return;
+                          setCc(curr => ({ ...curr, ...p.cc }));
+                          act('setCCSaturation', { input: inp, value: (p.cc.saturation / 100).toFixed(2) });
+                          act('setCCHue', { input: inp, value: (p.cc.hue / 180).toFixed(2) });
+                          act('setCCLift', { input: inp, value: (p.cc.lift / 100).toFixed(2) });
+                          act('setCCGamma', { input: inp, value: (p.cc.gamma / 100).toFixed(2) });
+                          act('setCCGain', { input: inp, value: (p.cc.gain / 100).toFixed(2) });
+                        }}
+                      >
+                        {p.l}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="vc-color-btn reset"
+                    onClick={() => {
+                      const inp = ccInput || status?.activeInput || inputs[0]?.number;
+                      setCc({ saturation: 100, hue: 0, gamma: 0, gain: 0, lift: 0, contrast: 0, brightness: 0, alpha: 255 });
+                      if (inp) act('resetColorCorrection', { input: inp });
+                    }}
+                  >
+                    ↩ Reset Color
+                  </button>
                 </div>
+
+                {/* Sliders Grid */}
                 <div className="vc-sliders-grid">
-                  {[{k:'saturation',l:'Saturation',min:0,max:200,c:'#ec4899'},{k:'hue',l:'Hue',min:-180,max:180,c:'#8b5cf6'},{k:'gamma',l:'Gamma',min:-100,max:100,c:'#f59e0b'},{k:'gain',l:'Gain',min:-100,max:100,c:'#22c55e'},{k:'lift',l:'Lift',min:-100,max:100,c:'#3b82f6'},{k:'contrast',l:'Contrast',min:-100,max:100,c:'#06b6d4'},{k:'brightness',l:'Brightness',min:-100,max:100,c:'#f97316'},{k:'alpha',l:'Alpha',min:0,max:255,c:'#94a3b8'}].map(s => (
-                    <div key={s.k} className="vc-slider-row">
-                      <span className="vc-slider-label">{s.l}</span>
-                      <input type="range" min={s.min} max={s.max} value={cc[s.k]} className="vc-slider"
-                        onChange={e => { const v = parseInt(e.target.value); setCc(c => ({...c,[s.k]:v})); act(s.k==='alpha'?'setAlpha':`set${s.l}`,{input:ccInput,value:v}); }}
-                        style={{ accentColor: s.c }} />
-                      <span className="vc-slider-val">{cc[s.k]}</span>
+                  {[
+                    { k: 'saturation', l: 'Saturation', min: 0, max: 200, unit: '%', def: 100, c: '#ec4899',
+                      fn: (v) => act('setCCSaturation', { input: ccInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'hue', l: 'Hue', min: -180, max: 180, unit: '°', def: 0, c: '#8b5cf6',
+                      fn: (v) => act('setCCHue', { input: ccInput, value: (v / 180).toFixed(2) }) },
+                    { k: 'lift', l: 'Lift (Blacks)', min: -100, max: 100, unit: '', def: 0, c: '#3b82f6',
+                      fn: (v) => act('setCCLift', { input: ccInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'gamma', l: 'Gamma (Mids)', min: -100, max: 100, unit: '', def: 0, c: '#f59e0b',
+                      fn: (v) => act('setCCGamma', { input: ccInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'gain', l: 'Gain (Whites)', min: -100, max: 100, unit: '', def: 0, c: '#22c55e',
+                      fn: (v) => act('setCCGain', { input: ccInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'alpha', l: 'Opacity (Alpha)', min: 0, max: 255, unit: '', def: 255, c: '#94a3b8',
+                      fn: (v) => act('setAlpha', { input: ccInput, value: v }) },
+                  ].map(s => (
+                    <div key={s.k} className="vc-slider-card">
+                      <div className="vc-slider-card-top">
+                        <span className="vc-slider-label">{s.l}</span>
+                        <span className="vc-slider-val">{cc[s.k]}{s.unit}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={s.min}
+                        max={s.max}
+                        value={cc[s.k]}
+                        className="vc-slider"
+                        onChange={e => {
+                          const v = parseInt(e.target.value);
+                          setCc(c => ({ ...c, [s.k]: v }));
+                          s.fn(v);
+                        }}
+                        style={{ accentColor: s.c }}
+                      />
+                      <div className="vc-slider-card-bot">
+                        <span>{s.min}{s.unit}</span>
+                        <button
+                          type="button"
+                          className="vc-slider-reset-dot"
+                          onClick={() => {
+                            setCc(c => ({ ...c, [s.k]: s.def }));
+                            s.fn(s.def);
+                          }}
+                          title={`Reset to default (${s.def})`}
+                        >
+                          Def
+                        </button>
+                        <span>{s.max}{s.unit}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
+            {/* ─── POSITION & ZOOM SUB-TAB ─── */}
             {cameraSub === 'position' && (
-              <div className="vc-color">
-                <div className="vc-color-top">
-                  <ISel val={posInput} set={setPosInput} label="Select Input..." />
-                  <button className="vc-color-btn" onClick={() => act('resetInput',{input:posInput})}>↩ Reset All</button>
+              <div className="vc-cam-panel">
+                <CamTargetBar currentInput={posInput} setInput={setPosInput} />
+
+                {/* Layout Presets */}
+                <div className="vc-color-actions">
+                  <div className="vc-preset-chips">
+                    <span className="vc-field-label" style={{alignSelf:'center',margin:0}}>Layouts:</span>
+                    {[
+                      { l: 'Fullscreen', pos: { panX: 0, panY: 0, zoom: 100, cropX1: 0, cropY1: 0, cropX2: 0, cropY2: 0 } },
+                      { l: 'PIP Bottom-Right', pos: { panX: 60, panY: -60, zoom: 35, cropX1: 0, cropY1: 0, cropX2: 0, cropY2: 0 } },
+                      { l: 'PIP Top-Right', pos: { panX: 60, panY: 60, zoom: 35, cropX1: 0, cropY1: 0, cropX2: 0, cropY2: 0 } },
+                      { l: 'Split Left', pos: { panX: -25, panY: 0, zoom: 100, cropX1: 0, cropY1: 0, cropX2: 50, cropY2: 0 } },
+                      { l: 'Split Right', pos: { panX: 25, panY: 0, zoom: 100, cropX1: 50, cropY1: 0, cropX2: 0, cropY2: 0 } },
+                    ].map(p => (
+                      <button
+                        key={p.l}
+                        type="button"
+                        className="vc-preset-chip"
+                        onClick={() => {
+                          const inp = posInput || status?.activeInput || inputs[0]?.number;
+                          if (!inp) return;
+                          setPos(curr => ({ ...curr, ...p.pos }));
+                          act('setPanX', { input: inp, value: (p.pos.panX / 100).toFixed(2) });
+                          act('setPanY', { input: inp, value: (p.pos.panY / 100).toFixed(2) });
+                          act('setZoom', { input: inp, value: (p.pos.zoom / 100).toFixed(2) });
+                          act('setCropX1', { input: inp, value: (p.pos.cropX1 / 100).toFixed(2) });
+                          act('setCropY1', { input: inp, value: (p.pos.cropY1 / 100).toFixed(2) });
+                          act('setCropX2', { input: inp, value: (1 - p.pos.cropX2 / 100).toFixed(2) });
+                          act('setCropY2', { input: inp, value: (1 - p.pos.cropY2 / 100).toFixed(2) });
+                        }}
+                      >
+                        {p.l}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="vc-color-btn reset"
+                    onClick={() => {
+                      const inp = posInput || status?.activeInput || inputs[0]?.number;
+                      setPos({ panX: 0, panY: 0, zoom: 100, cropX1: 0, cropY1: 0, cropX2: 0, cropY2: 0 });
+                      if (inp) act('resetPosition', { input: inp });
+                    }}
+                  >
+                    ↩ Reset All
+                  </button>
                 </div>
+
+                {/* Sliders Grid */}
                 <div className="vc-sliders-grid">
-                  {[{k:'panX',l:'Pan X',min:-200,max:200,a:'setPanX'},{k:'panY',l:'Pan Y',min:-200,max:200,a:'setPanY'},{k:'zoom',l:'Zoom %',min:0,max:400,a:'setZoom'},{k:'cropX1',l:'Crop Left',min:0,max:100,a:'setCropX1'},{k:'cropY1',l:'Crop Top',min:0,max:100,a:'setCropY1'},{k:'cropX2',l:'Crop Right',min:0,max:100,a:'setCropX2'},{k:'cropY2',l:'Crop Bottom',min:0,max:100,a:'setCropY2'}].map(s => (
-                    <div key={s.k} className="vc-slider-row">
-                      <span className="vc-slider-label">{s.l}</span>
-                      <input type="range" min={s.min} max={s.max} value={pos[s.k]} className="vc-slider"
-                        onChange={e => { const v = parseInt(e.target.value); setPos(p => ({...p,[s.k]:v})); act(s.a,{input:posInput,value:v}); }}
-                        style={{ accentColor: 'var(--accent)' }} />
-                      <span className="vc-slider-val">{pos[s.k]}</span>
+                  {[
+                    { k: 'panX', l: 'Pan X (Horizontal)', min: -100, max: 100, unit: '%', def: 0, c: 'var(--accent)',
+                      fn: (v) => act('setPanX', { input: posInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'panY', l: 'Pan Y (Vertical)', min: -100, max: 100, unit: '%', def: 0, c: 'var(--accent)',
+                      fn: (v) => act('setPanY', { input: posInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'zoom', l: 'Zoom %', min: 10, max: 300, unit: '%', def: 100, c: '#22c55e',
+                      fn: (v) => act('setZoom', { input: posInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'cropX1', l: 'Crop Left', min: 0, max: 50, unit: '%', def: 0, c: '#f59e0b',
+                      fn: (v) => act('setCropX1', { input: posInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'cropY1', l: 'Crop Top', min: 0, max: 50, unit: '%', def: 0, c: '#f59e0b',
+                      fn: (v) => act('setCropY1', { input: posInput, value: (v / 100).toFixed(2) }) },
+                    { k: 'cropX2', l: 'Crop Right', min: 0, max: 50, unit: '%', def: 0, c: '#f59e0b',
+                      fn: (v) => act('setCropX2', { input: posInput, value: (1 - v / 100).toFixed(2) }) },
+                    { k: 'cropY2', l: 'Crop Bottom', min: 0, max: 50, unit: '%', def: 0, c: '#f59e0b',
+                      fn: (v) => act('setCropY2', { input: posInput, value: (1 - v / 100).toFixed(2) }) },
+                  ].map(s => (
+                    <div key={s.k} className="vc-slider-card">
+                      <div className="vc-slider-card-top">
+                        <span className="vc-slider-label">{s.l}</span>
+                        <span className="vc-slider-val">{pos[s.k]}{s.unit}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={s.min}
+                        max={s.max}
+                        value={pos[s.k]}
+                        className="vc-slider"
+                        onChange={e => {
+                          const v = parseInt(e.target.value);
+                          setPos(p => ({ ...p, [s.k]: v }));
+                          s.fn(v);
+                        }}
+                        style={{ accentColor: s.c }}
+                      />
+                      <div className="vc-slider-card-bot">
+                        <span>{s.min}{s.unit}</span>
+                        <button
+                          type="button"
+                          className="vc-slider-reset-dot"
+                          onClick={() => {
+                            setPos(p => ({ ...p, [s.k]: s.def }));
+                            s.fn(s.def);
+                          }}
+                          title={`Reset to default (${s.def})`}
+                        >
+                          Def
+                        </button>
+                        <span>{s.max}{s.unit}</span>
+                      </div>
                     </div>
                   ))}
                 </div>

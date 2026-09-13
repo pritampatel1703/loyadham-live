@@ -20,11 +20,18 @@ class VmixService {
   /** Generic: send ANY vMix API function */
   async sendFunction(func, params = {}) {
     try {
-      const query = new URLSearchParams({ Function: func, ...params });
+      const cleanParams = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null && v !== '') cleanParams[k] = v;
+      }
+      const query = new URLSearchParams({ Function: func, ...cleanParams });
       const url = `${this.baseUrl}?${query.toString()}`;
       const resp = await fetch(url, { timeout: 5000 });
-      if (!resp.ok) throw new Error(`vMix returned ${resp.status}`);
       this.connected = true;
+      if (!resp.ok) {
+        const text = await resp.text();
+        return { success: false, error: text || `vMix returned ${resp.status}` };
+      }
       this.lastError = '';
       return { success: true };
     } catch (err) {
@@ -265,20 +272,37 @@ class VmixService {
   async ptzSavePreset(input, preset) { return this.sendFunction('PTZSaveVirtualInputPosition', { Input: input, Value: preset }); }
 
   // ═══════════════════════════════════════════════
-  //  COLOR CORRECTION
+  //  COLOR CORRECTION (Real vMix Shortcut Functions)
   // ═══════════════════════════════════════════════
-  async setSaturation(input, value) { return this.sendFunction('SetSaturation', { Input: input, Value: value }); }
-  async setHue(input, value) { return this.sendFunction('SetHue', { Input: input, Value: value }); }
-  async setGamma(input, value) { return this.sendFunction('SetGamma', { Input: input, Value: value }); }
-  async setGain(input, value) { return this.sendFunction('SetGain', { Input: input, Value: value }); }
-  async setLift(input, value) { return this.sendFunction('SetLift', { Input: input, Value: value }); }
-  async setContrast(input, value) { return this.sendFunction('SetContrast', { Input: input, Value: value }); }
-  async setBrightness(input, value) { return this.sendFunction('SetBrightness', { Input: input, Value: value }); }
-  async colorCorrectionAuto(input) { return this.sendFunction('ColorCorrectionAuto', { Input: input }); }
-  async colorCorrectionReset(input) { return this.sendFunction('ColorCorrectionReset', { Input: input }); }
+  async setCCSaturation(input, value) { return this.sendFunction('SetCCSaturation', { Input: input, Value: value }); }
+  async setCCHue(input, value) { return this.sendFunction('SetCCHue', { Input: input, Value: value }); }
+  async setCCLiftRGB(input, value) { return this.sendFunction('SetCCLiftRGB', { Input: input, Value: value }); }
+  async setCCLiftY(input, value) { return this.sendFunction('SetCCLiftY', { Input: input, Value: value }); }
+  async setCCGammaRGB(input, value) { return this.sendFunction('SetCCGammaRGB', { Input: input, Value: value }); }
+  async setCCGammaY(input, value) { return this.sendFunction('SetCCGammaY', { Input: input, Value: value }); }
+  async setCCGainRGB(input, value) { return this.sendFunction('SetCCGainRGB', { Input: input, Value: value }); }
+  async setCCGainY(input, value) { return this.sendFunction('SetCCGainY', { Input: input, Value: value }); }
+  async setAlpha(input, value) { return this.sendFunction('SetAlpha', { Input: input, Value: value }); }
+  async resetColorCorrection(input) {
+    await this.sendFunction('SetCCSaturation', { Input: input, Value: 1 });
+    await this.sendFunction('SetCCHue', { Input: input, Value: 0 });
+    await this.sendFunction('SetCCGainRGB', { Input: input, Value: 0 });
+    await this.sendFunction('SetCCGammaRGB', { Input: input, Value: 0 });
+    return this.sendFunction('SetCCLiftRGB', { Input: input, Value: 0 });
+  }
+  // Backwards compatibility aliases
+  async setSaturation(input, value) { return this.setCCSaturation(input, value); }
+  async setHue(input, value) { return this.setCCHue(input, value); }
+  async setGamma(input, value) { return this.setCCGammaRGB(input, value); }
+  async setGain(input, value) { return this.setCCGainRGB(input, value); }
+  async setLift(input, value) { return this.setCCLiftRGB(input, value); }
+  async setContrast(input, value) { return this.setCCGammaY(input, value); }
+  async setBrightness(input, value) { return this.setCCGainY(input, value); }
+  async colorCorrectionAuto(input) { return this.resetColorCorrection(input); }
+  async colorCorrectionReset(input) { return this.resetColorCorrection(input); }
 
   // ═══════════════════════════════════════════════
-  //  POSITION / CROP / ZOOM / ALPHA
+  //  POSITION / CROP / ZOOM
   // ═══════════════════════════════════════════════
   async setPanX(input, value) { return this.sendFunction('SetPanX', { Input: input, Value: value }); }
   async setPanY(input, value) { return this.sendFunction('SetPanY', { Input: input, Value: value }); }
@@ -287,8 +311,16 @@ class VmixService {
   async setCropY1(input, value) { return this.sendFunction('SetCropY1', { Input: input, Value: value }); }
   async setCropX2(input, value) { return this.sendFunction('SetCropX2', { Input: input, Value: value }); }
   async setCropY2(input, value) { return this.sendFunction('SetCropY2', { Input: input, Value: value }); }
-  async setAlpha(input, value) { return this.sendFunction('SetAlpha', { Input: input, Value: value }); }
-  async resetInput(input) { return this.sendFunction('ResetInput', { Input: input }); }
+  async resetPosition(input) {
+    await this.sendFunction('SetPanX', { Input: input, Value: 0 });
+    await this.sendFunction('SetPanY', { Input: input, Value: 0 });
+    await this.sendFunction('SetZoom', { Input: input, Value: 1 });
+    await this.sendFunction('SetCropX1', { Input: input, Value: 0 });
+    await this.sendFunction('SetCropY1', { Input: input, Value: 0 });
+    await this.sendFunction('SetCropX2', { Input: input, Value: 1 });
+    return this.sendFunction('SetCropY2', { Input: input, Value: 1 });
+  }
+  async resetInput(input) { return this.resetPosition(input); }
 
   // ═══════════════════════════════════════════════
   //  CHROMA KEY / VIRTUAL SET
