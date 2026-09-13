@@ -41,16 +41,48 @@ router.post('/:id/action', authenticate, requireRole('operator'), async (req, re
   if (!v) return res.status(404).json({ error: 'Not found' });
   const { action, params } = req.body;
   const actions = {
+    // Production
     cut: () => v.cut(), fade: () => v.fade(params?.duration), transition: () => v.transition(params?.number),
     setPreview: () => v.setPreview(params?.input), setProgram: () => v.setProgram(params?.input),
+    quickPlay: () => v.quickPlay(params?.input),
+    // Inputs
     addInput: () => v.addInput(params?.type||'Video', params?.path), removeInput: () => v.removeInput(params?.input),
-    renameInput: () => v.renameInput(params?.input, params?.name), quickPlay: () => v.quickPlay(params?.input),
+    renameInput: () => v.renameInput(params?.input, params?.name),
+    // Overlays
+    overlayOn: () => v.overlayOn(params?.number||1, params?.input), overlayOff: () => v.overlayOff(params?.number||1),
+    overlayToggle: () => v.overlayToggle(params?.number||1, params?.input), overlayZoom: () => v.overlayZoom(params?.number||1),
+    // Fullscreen
     fullscreen: () => v.fullscreen(params?.input), fullscreenOff: () => v.fullscreenOff(),
+    // Recording & Streaming
     startRecording: () => v.startRecording(), stopRecording: () => v.stopRecording(),
     startStreaming: () => v.startStreaming(), stopStreaming: () => v.stopStreaming(),
+    startStream: () => v.startStream(params?.number), stopStream: () => v.stopStream(params?.number),
+    snapshot: () => v.snapshot(params?.input), snapshotInput: () => v.snapshotInput(params?.input),
+    // Audio
     mute: () => v.muteInput(params?.input), unmute: () => v.unmuteInput(params?.input),
+    toggleAudio: () => v.toggleAudio(params?.input),
     setVolume: () => v.setVolume(params?.input, params?.volume),
-    overlayOn: () => v.overlayOn(params?.number||1, params?.input), overlayOff: () => v.overlayOff(params?.number||1),
+    setBalance: () => v.setBalance(params?.input, params?.value),
+    soloOn: () => v.soloOn(params?.input), soloOff: () => v.soloOff(params?.input), soloToggle: () => v.soloToggle(params?.input),
+    audioAutoOn: () => v.audioAutoOn(params?.input), audioAutoOff: () => v.audioAutoOff(params?.input),
+    audioBusOn: () => v.audioBusOn(params?.input, params?.bus), audioBusOff: () => v.audioBusOff(params?.input, params?.bus),
+    masterAudioOn: () => v.masterAudioOn(), masterAudioOff: () => v.masterAudioOff(),
+    setMasterVolume: () => v.setMasterVolume(params?.volume), setBusVolume: () => v.setBusVolume(params?.bus, params?.volume),
+    // Playback
+    play: () => v.playInput(params?.input), pause: () => v.pauseInput(params?.input),
+    restart: () => v.restartInput(params?.input),
+    loopOn: () => v.loopOn(params?.input), loopOff: () => v.loopOff(params?.input),
+    setPosition: () => v.setPosition(params?.input, params?.value), setRate: () => v.setRate(params?.input, params?.rate),
+    // FTB & T-Bar
+    fadeToBlack: () => v.fadeToBlack(), setFader: () => v.setFader(params?.value),
+    // Replay
+    replayPlay: () => v.replayPlay(), replayPause: () => v.replayPause(),
+    replayMoveLastEvent: () => v.replayMoveLastEvent(),
+    replayFastForward: () => v.replayFastForward(params?.speed), replayFastBackward: () => v.replayFastBackward(params?.speed),
+    replayJumpToNow: () => v.replayJumpToNow(), replayMarkIn: () => v.replayMarkIn(), replayMarkOut: () => v.replayMarkOut(),
+    // Titles
+    setTitle: () => v.setTitle(params?.input, params?.index, params?.value),
+    selectTitlePreset: () => v.selectTitlePreset(params?.input, params?.index),
   };
   if (!actions[action]) return res.status(400).json({ error: `Unknown action: ${action}` });
   const result = await actions[action]();

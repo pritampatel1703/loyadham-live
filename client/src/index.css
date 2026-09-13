@@ -146,6 +146,9 @@ tr:hover td{background:var(--bg-card-hover)}
 .vmix-trans-btn.cut:hover{box-shadow:0 0 15px rgba(255,61,113,.4)}
 .vmix-trans-btn.fade{background:var(--orange);color:#000;border-color:var(--orange)}
 .vmix-trans-btn:hover{transform:scale(1.05)}
+.vmix-stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px}
+.vmix-stat-label{font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.vmix-stat-value{font-size:.95rem;font-weight:700}
 
 /* ═══ ATEM CONTROLS ═══ */
 .atem-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px}

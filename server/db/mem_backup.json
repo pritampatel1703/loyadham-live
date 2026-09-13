@@ -6,16 +6,16 @@
       "label": "",
       "group_name": "Default",
       "pairing_token": "A6BB83E2E490",
-      "is_online": 1,
-      "battery_percent": 28,
-      "signal_quality": 16,
+      "is_online": 0,
+      "battery_percent": -1,
+      "signal_quality": -1,
       "temperature": -1,
       "stream_resolution": "1920x1080",
       "stream_fps": 30,
       "stream_bitrate": 0,
-      "network_type": "4G",
+      "network_type": "",
       "ip_address": "",
-      "tally_state": "program",
+      "tally_state": "preview",
       "tags": []
     }
   ]

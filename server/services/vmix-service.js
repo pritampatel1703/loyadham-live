@@ -99,27 +99,79 @@ class VmixService {
   async setPreview(input) { return this.sendFunction('PreviewInput', { Input: input }); }
   async setProgram(input) { return this.sendFunction('ActiveInput', { Input: input }); }
   async quickPlay(input) { return this.sendFunction('QuickPlay', { Input: input }); }
+
+  // ═══ Overlay Controls (1-4) ═══
   async overlayOn(num, input) { return this.sendFunction(`OverlayInput${num}In`, { Input: input }); }
   async overlayOff(num) { return this.sendFunction(`OverlayInput${num}Out`); }
+  async overlayToggle(num, input) { return this.sendFunction(`OverlayInput${num}`, { Input: input }); }
+  async overlayZoom(num) { return this.sendFunction(`OverlayInput${num}Zoom`); }
 
   // ═══ Recording & Streaming ═══
   async startRecording() { return this.sendFunction('StartRecording'); }
   async stopRecording() { return this.sendFunction('StopRecording'); }
   async startStreaming() { return this.sendFunction('StartStreaming'); }
   async stopStreaming() { return this.sendFunction('StopStreaming'); }
+  async startStream(num) { return this.sendFunction(`StartStreaming`, { Value: num }); }
+  async stopStream(num) { return this.sendFunction(`StopStreaming`, { Value: num }); }
+  async snapshot(input) { return this.sendFunction('Snapshot', input ? { Input: input } : {}); }
+  async snapshotInput(input) { return this.sendFunction('SnapshotInput', { Input: input }); }
 
   // ═══ Audio ═══
   async muteInput(input) { return this.sendFunction('AudioOff', { Input: input }); }
   async unmuteInput(input) { return this.sendFunction('AudioOn', { Input: input }); }
+  async toggleAudio(input) { return this.sendFunction('Audio', { Input: input }); }
   async setVolume(input, volume) { return this.sendFunction('SetVolume', { Input: input, Value: volume }); }
+  async setBalance(input, value) { return this.sendFunction('SetBalance', { Input: input, Value: value }); }
+  async soloOn(input) { return this.sendFunction('SoloOn', { Input: input }); }
+  async soloOff(input) { return this.sendFunction('SoloOff', { Input: input }); }
+  async soloToggle(input) { return this.sendFunction('Solo', { Input: input }); }
+  async audioAutoOn(input) { return this.sendFunction('AudioAutoOn', { Input: input }); }
+  async audioAutoOff(input) { return this.sendFunction('AudioAutoOff', { Input: input }); }
+  // Audio Bus Routing
+  async audioBusOn(input, bus) { return this.sendFunction(`AudioBus${bus}On`, { Input: input }); }
+  async audioBusOff(input, bus) { return this.sendFunction(`AudioBus${bus}Off`, { Input: input }); }
+  // Master Audio
+  async masterAudioOn() { return this.sendFunction('MasterAudioOn'); }
+  async masterAudioOff() { return this.sendFunction('MasterAudioOff'); }
+  async setMasterVolume(volume) { return this.sendFunction('SetMasterVolume', { Value: volume }); }
+  // Bus Volume
+  async setBusVolume(bus, volume) { return this.sendFunction(`SetBus${bus}Volume`, { Value: volume }); }
+
+  // ═══ Playback Controls ═══
+  async playInput(input) { return this.sendFunction('Play', { Input: input }); }
+  async pauseInput(input) { return this.sendFunction('Pause', { Input: input }); }
+  async restartInput(input) { return this.sendFunction('Restart', { Input: input }); }
+  async loopOn(input) { return this.sendFunction('LoopOn', { Input: input }); }
+  async loopOff(input) { return this.sendFunction('LoopOff', { Input: input }); }
+  async setPosition(input, ms) { return this.sendFunction('SetPosition', { Input: input, Value: ms }); }
+  async setRate(input, rate) { return this.sendFunction('SetRate', { Input: input, Value: rate }); }
+
+  // ═══ Fade to Black ═══
+  async fadeToBlack() { return this.sendFunction('FadeToBlack'); }
+
+  // ═══ T-Bar ═══
+  async setFader(value) { return this.sendFunction('SetFader', { Value: value }); }
 
   // ═══ Fullscreen ═══
   async fullscreen(input) { return this.sendFunction('FullscreenOn', { Input: input }); }
   async fullscreenOff() { return this.sendFunction('FullscreenOff'); }
 
+  // ═══ MultiView ═══
+  async multiViewOverlay(input) { return this.sendFunction('MultiViewOverlay', { Input: input }); }
+
   // ═══ Replay ═══
   async replayPlay() { return this.sendFunction('ReplayPlay'); }
   async replayPause() { return this.sendFunction('ReplayPause'); }
+  async replayMoveLastEvent() { return this.sendFunction('ReplayMoveLastEvent'); }
+  async replayFastForward(speed) { return this.sendFunction('ReplayFastForward', { Value: speed }); }
+  async replayFastBackward(speed) { return this.sendFunction('ReplayFastBackward', { Value: speed }); }
+  async replayJumpToNow() { return this.sendFunction('ReplayJumpToNow'); }
+  async replayMarkIn() { return this.sendFunction('ReplayMarkIn'); }
+  async replayMarkOut() { return this.sendFunction('ReplayMarkOut'); }
+
+  // ═══ Titles / Text ═══
+  async setTitle(input, index, value) { return this.sendFunction('SetText', { Input: input, SelectedIndex: index, Value: value }); }
+  async selectTitlePreset(input, index) { return this.sendFunction('SelectTitlePreset', { Input: input, Value: index }); }
 }
 
 module.exports = VmixService;
