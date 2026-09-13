@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 
+// Navigation items — v2.1 with SwitcherHub
 const NAV = [
   { path: '/dashboard', icon: '📊', label: 'Dashboard' },
   { path: '/devices', icon: '📹', label: 'Devices' },
   { path: '/production', icon: '🎬', label: 'Production' },
   { path: '/vmix', icon: '🎛️', label: 'vMix Control' },
   { path: '/atem', icon: '🎚️', label: 'Blackmagic ATEM' },
+  { path: '/switchers', icon: '🔀', label: 'Switcher Hub' },
   { path: '/events', icon: '📅', label: 'Events' },
   { path: '/analytics', icon: '📈', label: 'Analytics' },
   { path: '/streaming', icon: '📡', label: 'Streaming' },

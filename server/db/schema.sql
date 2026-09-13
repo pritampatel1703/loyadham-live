@@ -125,11 +125,28 @@ CREATE TABLE IF NOT EXISTS atem_connections (
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Generic Switcher Connections (Datavideo, Roland, OBS, TriCaster, Panasonic, FOR-A, Livestream, OSEE)
+CREATE TABLE IF NOT EXISTS switcher_connections (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT 'Switcher',
+  manufacturer TEXT NOT NULL DEFAULT 'generic',
+  ip TEXT NOT NULL DEFAULT '192.168.1.100',
+  port INTEGER NOT NULL DEFAULT 0,
+  protocol TEXT DEFAULT 'tcp',
+  is_connected INTEGER NOT NULL DEFAULT 0,
+  auto_reconnect INTEGER NOT NULL DEFAULT 1,
+  model TEXT DEFAULT '',
+  last_connected TIMESTAMP WITH TIME ZONE,
+  last_error TEXT DEFAULT '',
+  config TEXT DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Production Logs
 CREATE TABLE IF NOT EXISTS production_logs (
   id SERIAL PRIMARY KEY,
   event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
-  type TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info','warning','error','vmix','device','stream','production','atem')),
+  type TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info','warning','error','vmix','device','stream','production','atem','switcher')),
   source TEXT DEFAULT 'system',
   message TEXT NOT NULL,
   metadata TEXT DEFAULT '{}',
@@ -178,6 +195,7 @@ CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 CREATE INDEX IF NOT EXISTS idx_production_logs_created ON production_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_analytics_device ON analytics_snapshots(device_id);
 CREATE INDEX IF NOT EXISTS idx_analytics_created ON analytics_snapshots(created_at);
+CREATE INDEX IF NOT EXISTS idx_switcher_manufacturer ON switcher_connections(manufacturer);
 
 -- ═══ Default settings ═══
 INSERT INTO settings (key, value, category) VALUES

@@ -70,6 +70,7 @@ const memDB = {
   events: [],
   vmix: [{ id: 'vmix-1', name: 'Default vMix', host: '127.0.0.1', port: 8088, is_connected: 0, auto_reconnect: 1 }],
   atem: [{ id: 'atem-1', name: 'Default ATEM Switcher', ip: '192.168.1.50', is_connected: 0, auto_reconnect: 1, model: '' }],
+  switchers: [],
   logs: [],
   analytics: [],
   layouts: []
@@ -130,6 +131,12 @@ function mockDbQuery(sql, params, isOne) {
   else if (sql.includes('FROM users')) result = memDB.users;
   else if (sql.includes('FROM vmix_connections')) result = memDB.vmix;
   else if (sql.includes('FROM atem_connections')) result = memDB.atem;
+  else if (sql.includes('FROM switcher_connections')) {
+    result = memDB.switchers || [];
+    if (sql.includes('WHERE manufacturer')) {
+      result = result.filter(s => s.manufacturer === params[0]);
+    }
+  }
   else if (sql.includes('COUNT')) {
     if (sql.includes('FROM devices WHERE is_online=1')) {
       const count = memDB.devices.filter(d => d.is_online === 1).length;
@@ -224,6 +231,20 @@ function mockDbRun(sql, params) {
   } else if (sql.includes('DELETE FROM device_tags')) {
     if (!memDB.tags) memDB.tags = [];
     memDB.tags = memDB.tags.filter(t => !(t.device_id === params[0] && t.tag === params[1]));
+  } else if (sql.includes('INSERT INTO switcher_connections')) {
+    if (!memDB.switchers) memDB.switchers = [];
+    memDB.switchers.push({ id: params[0], name: params[1], manufacturer: params[2], ip: params[3], port: params[4], protocol: params[5], config: params[6] || '{}', is_connected: 0, auto_reconnect: 1, model: '' });
+  } else if (sql.includes('UPDATE switcher_connections SET is_connected')) {
+    const s = (memDB.switchers || []).find(x => x.id === params[2]);
+    if (s) { s.is_connected = params[0]; s.model = params[1]; }
+  } else if (sql.includes('UPDATE switcher_connections SET name')) {
+    const s = (memDB.switchers || []).find(x => x.id === params[5]);
+    if (s) { s.name = params[0]; s.ip = params[1]; s.port = params[2]; s.auto_reconnect = params[3]; s.config = params[4]; }
+  } else if (sql.includes('UPDATE switcher_connections SET last_error')) {
+    const s = (memDB.switchers || []).find(x => x.id === params[1]);
+    if (s) { s.is_connected = 0; s.last_error = params[0]; }
+  } else if (sql.includes('DELETE FROM switcher_connections')) {
+    memDB.switchers = (memDB.switchers || []).filter(s => s.id !== params[0]);
   } else if (sql.includes('INSERT INTO production_logs')) {
     if (!memDB.logs) memDB.logs = [];
     memDB.logs.push({
@@ -332,6 +353,16 @@ const helpers = {
   updateAtemStatus: (connected, model, id) => run("UPDATE atem_connections SET is_connected=$1,model=$2,last_connected=CURRENT_TIMESTAMP WHERE id=$3", [connected, model, id]),
   updateAtemError: (error, id) => run('UPDATE atem_connections SET is_connected=0,last_error=$1 WHERE id=$2', [error, id]),
   deleteAtemConnection: (id) => run('DELETE FROM atem_connections WHERE id=$1', [id]),
+
+  // Generic Switchers (Datavideo, Roland, OBS, TriCaster, Panasonic, FOR-A, Livestream, OSEE)
+  getAllSwitcherConnections: () => queryAll('SELECT * FROM switcher_connections ORDER BY manufacturer, created_at'),
+  getSwitcherById: (id) => queryOne('SELECT * FROM switcher_connections WHERE id=$1', [id]),
+  getSwitchersByManufacturer: (mfr) => queryAll('SELECT * FROM switcher_connections WHERE manufacturer=$1', [mfr]),
+  createSwitcherConnection: (id, name, manufacturer, ip, port, protocol, config) => run('INSERT INTO switcher_connections (id,name,manufacturer,ip,port,protocol,config) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, name, manufacturer, ip, port, protocol, config || '{}']),
+  updateSwitcherConnection: (name, ip, port, autoReconnect, config, id) => run('UPDATE switcher_connections SET name=$1,ip=$2,port=$3,auto_reconnect=$4,config=$5 WHERE id=$6', [name, ip, port, autoReconnect, config || '{}', id]),
+  updateSwitcherStatus: (connected, model, id) => run("UPDATE switcher_connections SET is_connected=$1,model=$2,last_connected=CURRENT_TIMESTAMP WHERE id=$3", [connected, model, id]),
+  updateSwitcherError: (error, id) => run('UPDATE switcher_connections SET is_connected=0,last_error=$1 WHERE id=$2', [error, id]),
+  deleteSwitcherConnection: (id) => run('DELETE FROM switcher_connections WHERE id=$1', [id]),
 
   // Production Logs
   getRecentLogs: (limit) => queryAll('SELECT * FROM production_logs ORDER BY created_at DESC LIMIT $1', [limit]),

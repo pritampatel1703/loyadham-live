@@ -295,6 +295,121 @@ class AtemService {
     if (!this.connected) throw new Error('ATEM not connected');
     return this.atem.macroStop();
   }
+
+  // ═══ Picture-in-Picture (via Upstream Keyer DVE) ═══
+
+  /**
+   * Enable PiP by configuring an upstream keyer as DVE
+   * @param {number} fillSource - Input number to show as PiP overlay
+   * @param {object} opts - Position/size options
+   * @param {number} opts.posX - X position (-16000 to 16000, default 7200 = bottom-right)
+   * @param {number} opts.posY - Y position (-9000 to 9000, default -4000 = bottom-right)
+   * @param {number} opts.sizeX - X scale (0 to 1000, default 250 = 25%)
+   * @param {number} opts.sizeY - Y scale (0 to 1000, default 250 = 25%)
+   * @param {boolean} opts.border - Enable border (default true)
+   * @param {number} opts.borderWidth - Border width in pixels (default 30)
+   * @param {number} keyerIndex - Which upstream keyer to use (0-3, default 0)
+   * @param {number} me - Mix Effect index (default 0)
+   */
+  async enablePiP(fillSource, opts = {}, keyerIndex = 0, me = 0) {
+    if (!this.connected) throw new Error('ATEM not connected');
+
+    const posX = opts.posX !== undefined ? opts.posX : 7200;
+    const posY = opts.posY !== undefined ? opts.posY : -4000;
+    const sizeX = opts.sizeX !== undefined ? opts.sizeX : 250;
+    const sizeY = opts.sizeY !== undefined ? opts.sizeY : 250;
+    const border = opts.border !== undefined ? opts.border : true;
+    const borderWidth = opts.borderWidth !== undefined ? opts.borderWidth : 30;
+
+    // 1. Set keyer type to DVE (type 1)
+    await this.atem.setUpstreamKeyerType({
+      mixEffectKeyType: 1, // DVE
+      flyEnabled: true,
+    }, me, keyerIndex);
+
+    // 2. Set fill source
+    await this.atem.setUpstreamKeyerFillSource(parseInt(fillSource), me, keyerIndex);
+
+    // 3. Set DVE settings (position, size, border)
+    await this.atem.setUpstreamKeyerDVESettings({
+      positionX: posX,
+      positionY: posY,
+      sizeX: sizeX,
+      sizeY: sizeY,
+      borderEnabled: border,
+      borderOuterWidth: border ? borderWidth : 0,
+      borderInnerWidth: 0,
+      borderOuterSoftness: 0,
+      borderInnerSoftness: 0,
+      borderBevelSoftness: 0,
+      borderBevelPosition: 0,
+      borderHue: 0,
+      borderSaturation: 0,
+      borderLuma: 1000, // white border
+      shadowEnabled: true,
+    }, me, keyerIndex);
+
+    // 4. Set keyer on air
+    await this.atem.setUpstreamKeyerOnAir(true, me, keyerIndex);
+
+    return { success: true, pip: true, source: fillSource, position: { x: posX, y: posY }, size: { x: sizeX, y: sizeY } };
+  }
+
+  /**
+   * Disable PiP (take upstream keyer off air)
+   */
+  async disablePiP(keyerIndex = 0, me = 0) {
+    if (!this.connected) throw new Error('ATEM not connected');
+    await this.atem.setUpstreamKeyerOnAir(false, me, keyerIndex);
+    return { success: true, pip: false };
+  }
+
+  /**
+   * Update PiP position/size without toggling on/off
+   */
+  async updatePiP(opts = {}, keyerIndex = 0, me = 0) {
+    if (!this.connected) throw new Error('ATEM not connected');
+    const settings = {};
+    if (opts.posX !== undefined) settings.positionX = opts.posX;
+    if (opts.posY !== undefined) settings.positionY = opts.posY;
+    if (opts.sizeX !== undefined) settings.sizeX = opts.sizeX;
+    if (opts.sizeY !== undefined) settings.sizeY = opts.sizeY;
+    if (opts.borderWidth !== undefined) settings.borderOuterWidth = opts.borderWidth;
+    if (opts.border !== undefined) settings.borderEnabled = opts.border;
+    await this.atem.setUpstreamKeyerDVESettings(settings, me, keyerIndex);
+    return { success: true };
+  }
+
+  /**
+   * Change PiP fill source (which camera appears in PiP window)
+   */
+  async setPiPSource(fillSource, keyerIndex = 0, me = 0) {
+    if (!this.connected) throw new Error('ATEM not connected');
+    await this.atem.setUpstreamKeyerFillSource(parseInt(fillSource), me, keyerIndex);
+    return { success: true, source: fillSource };
+  }
+
+  /**
+   * Get current PiP/keyer state
+   */
+  getPiPStatus(keyerIndex = 0, me = 0) {
+    const s = this.atem.state;
+    if (!s) return { enabled: false };
+    const keyer = s.video?.mixEffects?.[me]?.upstreamKeyers?.[keyerIndex];
+    if (!keyer) return { enabled: false };
+    const dve = keyer.dveSettings || {};
+    return {
+      enabled: keyer.onAir || false,
+      type: keyer.mixEffectKeyType,
+      fillSource: keyer.fillSource,
+      posX: dve.positionX || 0,
+      posY: dve.positionY || 0,
+      sizeX: dve.sizeX || 0,
+      sizeY: dve.sizeY || 0,
+      borderEnabled: dve.borderEnabled || false,
+      borderWidth: dve.borderOuterWidth || 0,
+    };
+  }
 }
 
 module.exports = AtemService;
