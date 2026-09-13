@@ -61,12 +61,33 @@ const { initDatabase } = require('./db/database');
     const rtmpHttpPort = process.env.RTMP_HTTP_PORT || '8009';
     const targetUrl = `http://127.0.0.1:${rtmpHttpPort}/${streamPath}`;
     
+    // Disable Nagle's algorithm on sockets for immediate packet dispatch
+    if (req.socket) req.socket.setNoDelay(true);
+    if (res.socket) res.socket.setNoDelay(true);
+
     const http = require('http');
-    http.get(targetUrl, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    const proxyReq = http.get(targetUrl, { agent: false }, (proxyRes) => {
+      if (proxyRes.socket) proxyRes.socket.setNoDelay(true);
+
+      const headers = { ...proxyRes.headers };
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      headers['Pragma'] = 'no-cache';
+      headers['Expires'] = '0';
+      headers['X-Accel-Buffering'] = 'no';
+      headers['Connection'] = 'keep-alive';
+
+      res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res);
-    }).on('error', (err) => {
-      res.status(500).send('RTMP Proxy Error: ' + err.message);
+    });
+
+    proxyReq.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(500).send('RTMP Proxy Error: ' + err.message);
+      }
+    });
+
+    req.on('close', () => {
+      proxyReq.destroy();
     });
   });
 

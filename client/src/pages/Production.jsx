@@ -51,6 +51,7 @@ export default function Production() {
   const [rtmpStatus, setRtmpStatus] = useState(null);   // RTMP server status
   const [qrData, setQrData] = useState(null);
   const rtmpPlayersRef = useRef({});  // streamKey -> mpegts.Player
+  const rtmpChasersRef = useRef({});  // streamKey / refKey -> setInterval ID
 
 
 
@@ -119,6 +120,14 @@ export default function Production() {
       });
     });
     productionSocket.on('rtmp:stream-end', (data) => {
+      if (rtmpChasersRef.current[data.streamKey]) {
+        clearInterval(rtmpChasersRef.current[data.streamKey]);
+        delete rtmpChasersRef.current[data.streamKey];
+      }
+      if (rtmpPlayersRef.current[data.streamKey]) {
+        try { rtmpPlayersRef.current[data.streamKey].destroy(); } catch (_) {}
+        delete rtmpPlayersRef.current[data.streamKey];
+      }
       setRtmpStreams(prev => prev.filter(s => s.streamKey !== data.streamKey));
     });
 
@@ -185,9 +194,20 @@ export default function Production() {
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
-      console.log('[Production] ontrack:', streamId);
-      remoteStreams.current[streamId] = e.streams[0];
-      attachStream(streamId, e.streams[0]);
+      console.log('[Production] ontrack:', streamId, e.track?.kind);
+      const stream = e.streams[0] || remoteStreams.current[streamId] || new MediaStream();
+      if (!stream.getTracks().includes(e.track)) stream.addTrack(e.track);
+      remoteStreams.current[streamId] = stream;
+
+      if (e.track.kind === 'video') {
+        e.track.onunmute = () => {
+          console.log('[Production] Remote video track unmuted:', streamId);
+          attachStream(streamId, remoteStreams.current[streamId]);
+          setUpdateTrigger(t => t + 1);
+        };
+      }
+
+      attachStream(streamId, stream);
       setUpdateTrigger(t => t + 1);
     };
 
@@ -282,9 +302,18 @@ export default function Production() {
           // Connection is still healthy — just ensure tracks are up to date
           try {
             const senders = existingPc.getSenders();
-            activeStream.getTracks().forEach(track => {
-              const sender = senders.find(s => s.track?.kind === track.kind);
-              if (sender) sender.replaceTrack(track);
+            activeStream.getTracks().forEach(async track => {
+              let sender = senders.find(s => s.track?.kind === track.kind);
+              if (!sender) {
+                const tc = existingPc.getTransceivers?.().find(t =>
+                  (t.sender?.track?.kind === track.kind) ||
+                  (t.receiver?.track?.kind === track.kind)
+                );
+                if (tc) sender = tc.sender;
+              }
+              if (sender) {
+                try { await sender.replaceTrack(track); } catch (_) {}
+              }
             });
           } catch (_) {}
           console.log('[Production] Reused existing healthy relay for viewer:', peerId);
@@ -398,6 +427,10 @@ export default function Production() {
       peerConns.current = {};
       pgmRelayPeers.current.forEach(pc => { try { pc.close(); } catch(_) {} });
       pgmRelayPeers.current.clear();
+      Object.values(rtmpChasersRef.current).forEach(clearInterval);
+      rtmpChasersRef.current = {};
+      Object.values(rtmpPlayersRef.current).forEach(p => { try { p.destroy(); } catch(_) {} });
+      rtmpPlayersRef.current = {};
     };
   }, [handleCameraOffer]);
 
@@ -411,9 +444,23 @@ export default function Production() {
     pgmRelayPeers.current.forEach(pc => {
       try {
         const senders = pc.getSenders();
-        activeStream.getTracks().forEach(track => {
-          const sender = senders.find(s => s.track?.kind === track.kind);
-          if (sender) sender.replaceTrack(track);
+        activeStream.getTracks().forEach(async track => {
+          let sender = senders.find(s => s.track?.kind === track.kind);
+          if (!sender) {
+            const tc = pc.getTransceivers?.().find(t =>
+              (t.sender?.track?.kind === track.kind) ||
+              (t.receiver?.track?.kind === track.kind)
+            );
+            if (tc) sender = tc.sender;
+          }
+          if (sender) {
+            try {
+              await sender.replaceTrack(track);
+              console.log('[Production] Replaced relay track:', track.kind);
+            } catch (err) {
+              console.warn('[Production] Failed to replace relay track:', track.kind, err);
+            }
+          }
         });
       } catch (_) {}
     });
@@ -435,6 +482,18 @@ export default function Production() {
       if (firstOnline) selectPgm(firstOnline.id);
     }
   }, [devices, connectToCamera]);
+
+  // Ensure all online camera preview videos are playing
+  useEffect(() => {
+    devices.forEach(d => {
+      const el = videoRefs.current[d.id];
+      const stream = remoteStreams.current[d.id];
+      if (el && stream && el.srcObject !== stream) {
+        el.srcObject = stream;
+        el.play().catch(() => {});
+      }
+    });
+  }, [devices, updateTrigger]);
 
   useEffect(() => {
     if (!vmixActive) return;
@@ -654,29 +713,58 @@ export default function Production() {
   }, [devices, pgm, pvw]);
 
   // Sync monitors when pvw/pgm changes or a stream connects
-  // Helper: create mpegts player for a monitor video element
+  // Helper: create mpegts player for a monitor video element with ultra-low latency
   const attachRtmpToMonitor = useCallback((videoEl, streamKey, refKey) => {
     if (!videoEl || !mpegts.isSupported()) return;
-    // Destroy old player if exists
-    if (rtmpPlayersRef.current[refKey]) {
-      try { rtmpPlayersRef.current[refKey].destroy(); } catch(e) {}
-      delete rtmpPlayersRef.current[refKey];
-    }
+    // Destroy old player & chaser if exists
+    detachRtmpFromMonitor(refKey);
+
     const flvUrl = `${window.location.protocol}//${window.location.host}/rtmp-flv/live/${streamKey}.flv`;
     const player = mpegts.createPlayer({ type: 'flv', isLive: true, url: flvUrl }, {
-      enableWorker: true, 
-      liveBufferLatencyChasing: true, 
-      liveBufferLatencyMaxLatency: 3.0, // Relaxed to prevent stuttering
-      liveBufferLatencyMinRemain: 0.3,  // Maintain healthy buffer
+      enableWorker: true,
+      lazyLoad: false,
+      lazyLoadMaxDuration: 0.2,
+      seekType: 'range',
+      liveBufferLatencyChasing: true,
+      liveBufferLatencyMaxLatency: 0.8,  // Chase when lag exceeds 800ms
+      liveBufferLatencyMinRemain: 0.15,  // Catch up to 150ms live edge
+      liveSync: true,
+      stashInitialSize: 16 * 1024,       // 16 KB initial buffer (starts immediately without 384KB delay)
       autoCleanupSourceBuffer: true,
+      autoCleanupMaxBackwardDuration: 1.5,
+      autoCleanupMinBackwardDuration: 0.5,
+      deferLoadAfterSourceOpen: false,
     });
     player.attachMediaElement(videoEl);
     player.load();
     player.play().catch(() => {});
     rtmpPlayersRef.current[refKey] = player;
+
+    // Anti-stutter Low-Latency Chaser: uses hysteresis and gentle 1.08x speedup to eliminate stickiness
+    if (rtmpChasersRef.current[refKey]) clearInterval(rtmpChasersRef.current[refKey]);
+    rtmpChasersRef.current[refKey] = setInterval(() => {
+      if (videoEl && !videoEl.paused && videoEl.buffered && videoEl.buffered.length > 0) {
+        const liveEdge = videoEl.buffered.end(videoEl.buffered.length - 1);
+        const delay = liveEdge - videoEl.currentTime;
+        if (delay > 1.8) {
+          // Only hard seek if severe network lag accumulated (>1.8s)
+          videoEl.currentTime = liveEdge - 0.25;
+        } else if (delay > 0.65) {
+          // Gentle 8% acceleration: completely imperceptible to ears and eyes, zero stickiness
+          videoEl.playbackRate = 1.08;
+        } else if (delay < 0.25) {
+          // Reset to normal 1.0x once caught up
+          videoEl.playbackRate = 1.0;
+        }
+      }
+    }, 500);
   }, []);
 
   const detachRtmpFromMonitor = useCallback((refKey) => {
+    if (rtmpChasersRef.current[refKey]) {
+      clearInterval(rtmpChasersRef.current[refKey]);
+      delete rtmpChasersRef.current[refKey];
+    }
     if (rtmpPlayersRef.current[refKey]) {
       try { rtmpPlayersRef.current[refKey].destroy(); } catch(e) {}
       delete rtmpPlayersRef.current[refKey];
@@ -910,7 +998,15 @@ export default function Production() {
             <div className="vmix-input-video" onClick={() => selectPvw(d.id)} onDoubleClick={() => selectPgm(d.id)}>
               {d.is_online ? (
                 <video
-                  ref={el => { if (el) videoRefs.current[d.id] = el; }}
+                  ref={el => {
+                    if (el) {
+                      videoRefs.current[d.id] = el;
+                      if (remoteStreams.current[d.id] && el.srcObject !== remoteStreams.current[d.id]) {
+                        el.srcObject = remoteStreams.current[d.id];
+                        el.play().catch(() => {});
+                      }
+                    }
+                  }}
                   autoPlay playsInline muted
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
@@ -953,7 +1049,7 @@ export default function Production() {
               <video
                 ref={el => {
                   if (el && !rtmpPlayersRef.current[stream.streamKey]) {
-                    // Initialize mpegts.js player for this RTMP stream
+                    // Initialize mpegts.js player for this RTMP stream with ultra-low latency
                     if (mpegts.isSupported()) {
                       const flvUrl = `${window.location.protocol}//${window.location.host}/rtmp-flv/live/${stream.streamKey}.flv`;
                       console.log('[RTMP] Initializing player for:', flvUrl);
@@ -964,12 +1060,18 @@ export default function Production() {
                         url: flvUrl,
                       }, {
                         enableWorker: true,
-                        lazyLoadMaxDuration: 3, 
+                        lazyLoad: false,
+                        lazyLoadMaxDuration: 0.2,
                         seekType: 'range',
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 3.0, // Relaxed to prevent stuttering
-                        liveBufferLatencyMinRemain: 0.3,  // Maintain healthy buffer
+                        liveBufferLatencyMaxLatency: 0.8,
+                        liveBufferLatencyMinRemain: 0.15,
+                        liveSync: true,
+                        stashInitialSize: 16 * 1024,
                         autoCleanupSourceBuffer: true,
+                        autoCleanupMaxBackwardDuration: 1.5,
+                        autoCleanupMinBackwardDuration: 0.5,
+                        deferLoadAfterSourceOpen: false,
                       });
 
                       player.on(mpegts.Events.ERROR, (type, detail, info) => {
@@ -989,6 +1091,25 @@ export default function Production() {
                         });
                       }
                       rtmpPlayersRef.current[stream.streamKey] = player;
+
+                      // Anti-stutter Low-Latency Chaser: gentle speedup with hysteresis, no jerky seeking
+                      if (rtmpChasersRef.current[stream.streamKey]) clearInterval(rtmpChasersRef.current[stream.streamKey]);
+                      rtmpChasersRef.current[stream.streamKey] = setInterval(() => {
+                        if (el && !el.paused && el.buffered && el.buffered.length > 0) {
+                          const liveEdge = el.buffered.end(el.buffered.length - 1);
+                          const delay = liveEdge - el.currentTime;
+                          if (delay > 1.8) {
+                            // Only hard seek if severe network lag accumulated (>1.8s)
+                            el.currentTime = liveEdge - 0.25;
+                          } else if (delay > 0.65) {
+                            // Gentle 8% acceleration: smooth and imperceptible, eliminates stickiness
+                            el.playbackRate = 1.08;
+                          } else if (delay < 0.25) {
+                            // Settle back to normal 1.0x once caught up
+                            el.playbackRate = 1.0;
+                          }
+                        }
+                      }, 500);
                     }
                   }
                 }}

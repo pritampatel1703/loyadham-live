@@ -211,8 +211,8 @@ export default function Camera() {
 
   // ── Start camera ──
   const startCamera = async () => {
-    if (rawStreamRef.current) rawStreamRef.current.getTracks().forEach(t => t.stop());
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    const oldRawStream = rawStreamRef.current;
+    const oldStream = streamRef.current;
     if (renderLoopRef.current) cancelAnimationFrame(renderLoopRef.current);
 
     try {
@@ -243,15 +243,19 @@ export default function Camera() {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
 
+      // Stop old tracks now that new stream is safely acquired
+      if (oldRawStream) oldRawStream.getTracks().forEach(t => t.stop());
+      if (oldStream && oldStream !== oldRawStream) oldStream.getTracks().forEach(t => t.stop());
+
       rawStreamRef.current = rawStream;
       rawTrackRef.current = rawStream.getVideoTracks()[0];
 
-      if (rawTrackRef.current.contentHint !== undefined) {
+      if (rawTrackRef.current && rawTrackRef.current.contentHint !== undefined) {
         rawTrackRef.current.contentHint = 'detail';
       }
 
       // Check zoom capabilities on raw hardware track
-      const caps = rawTrackRef.current.getCapabilities();
+      const caps = rawTrackRef.current ? rawTrackRef.current.getCapabilities() : {};
       if (caps.zoom) {
         setZoomRange({ min: caps.zoom.min || 1, max: caps.zoom.max || 5, step: 0.01 }); // Smooth step
       } else {
@@ -260,7 +264,7 @@ export default function Camera() {
 
       // Detect Pro Control capabilities
       const detectedCaps = {};
-      const settings = rawTrackRef.current.getSettings();
+      const settings = rawTrackRef.current ? rawTrackRef.current.getSettings() : {};
       const proProps = ['iso', 'exposureCompensation', 'focusDistance', 'colorTemperature', 'exposureTime', 'brightness'];
       proProps.forEach(prop => {
         if (caps[prop] && typeof caps[prop].min === 'number') {
@@ -354,21 +358,35 @@ export default function Camera() {
       streamRef.current = finalStream;
       trackRef.current = finalStream.getVideoTracks()[0]; // Video track sent to WebRTC
       
-      if (videoRef.current) videoRef.current.srcObject = finalStream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = finalStream;
+        videoRef.current.play().catch(e => console.log('[Camera] local video play:', e));
+      }
 
       // Re-apply zoom to hardware track if zooming was active
-      if (zoom > 1) {
+      if (zoom > 1 && rawTrackRef.current) {
         try { await rawTrackRef.current.applyConstraints({ advanced: [{ zoom }] }); } catch(e){}
       }
 
       // Replace tracks on all existing peer connections AND reapply quality params
       peersRef.current.forEach((pc) => {
         const senders = pc.getSenders();
-        finalStream.getTracks().forEach(track => {
-          const sender = senders.find(s => s.track?.kind === track.kind);
+        finalStream.getTracks().forEach(async track => {
+          let sender = senders.find(s => s.track?.kind === track.kind);
+          if (!sender) {
+            const tc = pc.getTransceivers?.().find(t =>
+              (t.sender?.track?.kind === track.kind) ||
+              (t.receiver?.track?.kind === track.kind)
+            );
+            if (tc) sender = tc.sender;
+          }
           if (sender) {
-            sender.replaceTrack(track);
-            if (track.kind === 'video') applyVideoEncoderParams(sender);
+            try {
+              await sender.replaceTrack(track);
+              if (track.kind === 'video') applyVideoEncoderParams(sender);
+            } catch (err) {
+              console.warn('[Camera] sender.replaceTrack error:', err);
+            }
           }
         });
       });

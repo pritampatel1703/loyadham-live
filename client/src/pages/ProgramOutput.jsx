@@ -26,6 +26,7 @@ export default function ProgramOutput() {
   const videoRefs = useRef({});       // streamId -> HTMLVideoElement (for WebRTC cameras & pgm-master)
   const rtmpVideoRefs = useRef({});   // streamKey -> HTMLVideoElement
   const rtmpPlayers = useRef({});     // streamKey -> mpegts.Player
+  const rtmpChasers = useRef({});     // streamKey -> setInterval ID
 
   // WebRTC internals
   const peerConns = useRef({});       // streamId -> RTCPeerConnection
@@ -52,13 +53,22 @@ export default function ProgramOutput() {
   // 2. Safely attach stream to video element without triggering AbortError
   const safeAttachStream = useCallback((el, stream, streamId) => {
     if (!el || !stream) return;
-    if (el.srcObject === stream) {
+
+    const hasVideo = stream.getVideoTracks().length > 0;
+
+    // If already attached AND video is playing with valid dimensions, don't interrupt
+    if (el.srcObject === stream && (!hasVideo || el.videoWidth > 0)) {
       if (el.paused) {
         el.play().catch(() => {});
       }
       return;
     }
-    console.log('[ProgramOutput] Attaching stream to video element:', streamId);
+
+    console.log('[ProgramOutput] Attaching stream to video element:', streamId, 'hasVideo:', hasVideo, 'videoTracks:', stream.getVideoTracks().length);
+    // If stream is the same object but had no video previously, clear first so browser rebuilds pipeline
+    if (el.srcObject === stream) {
+      el.srcObject = null;
+    }
     el.srcObject = stream;
     el.muted = true; // start muted for 100% browser autoplay policy compliance
     const p = el.play();
@@ -102,16 +112,28 @@ export default function ProgramOutput() {
     peerConns.current[streamId] = pc;
 
     pc.ontrack = (e) => {
-      console.log('[ProgramOutput] ontrack received for stream:', streamId);
-      const stream = e.streams[0];
+      console.log('[ProgramOutput] ontrack received for stream:', streamId, e.track?.kind);
+      const stream = e.streams[0] || remoteStreams.current[streamId] || new MediaStream();
+      if (!stream.getTracks().includes(e.track)) stream.addTrack(e.track);
       remoteStreams.current[streamId] = stream;
 
       const videoEl = videoRefs.current[streamId];
-      if (videoEl) {
+
+      if (e.track.kind === 'video') {
+        if (videoEl) safeAttachStream(videoEl, stream, streamId);
+        e.track.onunmute = () => {
+          console.log('[ProgramOutput] Video track unmuted for:', streamId);
+          const el = videoRefs.current[streamId];
+          if (el) safeAttachStream(el, stream, streamId);
+          setActiveFeeds(prev => ({ ...prev, [streamId]: true }));
+          setPgmEverActive(true);
+        };
+      } else if (videoEl) {
         safeAttachStream(videoEl, stream, streamId);
       }
 
       setActiveFeeds(prev => ({ ...prev, [streamId]: true }));
+      setPgmEverActive(true);
       setFeedUpdate(n => n + 1);
     };
 
@@ -160,12 +182,28 @@ export default function ProgramOutput() {
       peerConns.current[key] = pc;
 
       pc.ontrack = (e) => {
-        console.log('[ProgramOutput] ontrack received for stream:', key);
-        const stream = e.streams[0];
+        console.log('[ProgramOutput] ontrack received for stream:', key, e.track?.kind);
+        const stream = e.streams[0] || remoteStreams.current[key] || new MediaStream();
+        if (!stream.getTracks().includes(e.track)) stream.addTrack(e.track);
         remoteStreams.current[key] = stream;
+
         const videoEl = videoRefs.current[key];
-        if (videoEl) safeAttachStream(videoEl, stream, key);
+
+        if (e.track.kind === 'video') {
+          if (videoEl) safeAttachStream(videoEl, stream, key);
+          e.track.onunmute = () => {
+            console.log('[ProgramOutput] Video track unmuted for:', key);
+            const el = videoRefs.current[key];
+            if (el) safeAttachStream(el, stream, key);
+            setActiveFeeds(prev => ({ ...prev, [key]: true }));
+            setPgmEverActive(true);
+          };
+        } else if (videoEl) {
+          safeAttachStream(videoEl, stream, key);
+        }
+
         setActiveFeeds(prev => ({ ...prev, [key]: true }));
+        setPgmEverActive(true);
         setFeedUpdate(n => n + 1);
       };
 
@@ -209,7 +247,7 @@ export default function ProgramOutput() {
     }
   }, [connectToCamera, safeAttachStream]);
 
-  // 5. RTMP player initialization
+  // 5. RTMP player initialization with Ultra-Low Latency
   const startRtmp = useCallback((streamKey) => {
     if (!streamKey || !mpegts.isSupported()) return;
     if (rtmpPlayers.current[streamKey]) return; // already active
@@ -218,7 +256,7 @@ export default function ProgramOutput() {
     if (!videoEl) return;
 
     const flvUrl = `${window.location.protocol}//${window.location.host}/rtmp-flv/live/${streamKey}.flv`;
-    console.log('[ProgramOutput] Starting RTMP stream player:', flvUrl);
+    console.log('[ProgramOutput] Starting RTMP stream player with ultra-low latency:', flvUrl);
 
     const player = mpegts.createPlayer({
       type: 'flv',
@@ -226,10 +264,18 @@ export default function ProgramOutput() {
       url: flvUrl,
     }, {
       enableWorker: true,
+      lazyLoad: false,
+      lazyLoadMaxDuration: 0.2,
+      seekType: 'range',
       liveBufferLatencyChasing: true,
-      liveBufferLatencyMaxLatency: 2.5,
-      liveBufferLatencyMinRemain: 0.3,
+      liveBufferLatencyMaxLatency: 0.8,
+      liveBufferLatencyMinRemain: 0.15,
+      liveSync: true,
+      stashInitialSize: 16 * 1024,
       autoCleanupSourceBuffer: true,
+      autoCleanupMaxBackwardDuration: 1.5,
+      autoCleanupMinBackwardDuration: 0.5,
+      deferLoadAfterSourceOpen: false,
     });
 
     player.attachMediaElement(videoEl);
@@ -241,10 +287,33 @@ export default function ProgramOutput() {
       console.warn('[ProgramOutput] RTMP error:', type, detail);
     });
 
+    // Anti-stutter Low-Latency Chaser: gentle speedup with hysteresis, no jerky seeking
+    if (rtmpChasers.current[streamKey]) clearInterval(rtmpChasers.current[streamKey]);
+    rtmpChasers.current[streamKey] = setInterval(() => {
+      if (videoEl && !videoEl.paused && videoEl.buffered && videoEl.buffered.length > 0) {
+        const liveEdge = videoEl.buffered.end(videoEl.buffered.length - 1);
+        const delay = liveEdge - videoEl.currentTime;
+        if (delay > 1.8) {
+          // Only hard seek if severe network lag accumulated (>1.8s)
+          videoEl.currentTime = liveEdge - 0.25;
+        } else if (delay > 0.65) {
+          // Gentle 8% acceleration: smooth and imperceptible, eliminates stickiness
+          videoEl.playbackRate = 1.08;
+        } else if (delay < 0.25) {
+          // Settle back to normal 1.0x once caught up
+          videoEl.playbackRate = 1.0;
+        }
+      }
+    }, 500);
+
     rtmpPlayers.current[streamKey] = player;
   }, []);
 
   const stopRtmp = useCallback((streamKey) => {
+    if (rtmpChasers.current[streamKey]) {
+      clearInterval(rtmpChasers.current[streamKey]);
+      delete rtmpChasers.current[streamKey];
+    }
     const player = rtmpPlayers.current[streamKey];
     if (player) {
       try {
@@ -485,6 +554,8 @@ export default function ProgramOutput() {
         if (pc && typeof pc === 'object' && pc.close) pc.close();
       });
       peerConns.current = {};
+      Object.values(rtmpChasers.current).forEach(clearInterval);
+      rtmpChasers.current = {};
       Object.keys(rtmpPlayers.current).forEach(stopRtmp);
     };
   }, [handleOffer, loadSources, connectToCamera, stopRtmp]);
@@ -499,12 +570,17 @@ export default function ProgramOutput() {
     }
   }, [isRtmpPgm, currentRtmpKey, startRtmp]);
 
-  // 9. Re-attach pgm-master stream when video element mounts or updates
+  // 9. Re-attach pgm-master stream when video element mounts or updates, or when PGM changes
   useEffect(() => {
-    if (remoteStreams.current['pgm-master'] && videoRefs.current['pgm-master']) {
-      safeAttachStream(videoRefs.current['pgm-master'], remoteStreams.current['pgm-master'], 'pgm-master');
+    const videoEl = videoRefs.current['pgm-master'];
+    const stream = remoteStreams.current['pgm-master'];
+    if (videoEl && stream) {
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream;
+      }
+      videoEl.play().catch(() => {});
     }
-  }, [feedUpdate, safeAttachStream]);
+  }, [pgmId, feedUpdate, safeAttachStream]);
 
   // 10. Audio routing: unmute only the active feed
   useEffect(() => {

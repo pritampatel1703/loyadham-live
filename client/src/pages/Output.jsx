@@ -21,6 +21,13 @@ export default function Output() {
 
     pc.ontrack = (e) => {
       setStatus('');
+      if (e.track.kind === 'video') {
+        e.track.onunmute = () => {
+          if (videoRef.current) {
+            videoRef.current.play().catch(() => {});
+          }
+        };
+      }
       if (videoRef.current) {
         videoRef.current.srcObject = e.streams[0];
         // Start muted for autoplay compliance, unmute on user click

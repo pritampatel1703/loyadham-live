@@ -46,10 +46,10 @@ function setupRtmpServer(io) {
     logType: 1, // 0=none, 1=error, 2=normal, 3=debug
     rtmp: {
       port: rtmpPort,
-      chunk_size: 60000,
+      chunk_size: 4096, // 4KB low-latency chunks (down from 60000 to prevent packet accumulation delay)
       gop_cache: false, // Set to false for ultra-low latency (forces live edge)
-      ping: 10,         // Reduced ping
-      ping_timeout: 30, // Reduced timeout
+      ping: 5,          // Reduced ping (5s)
+      ping_timeout: 15, // Reduced timeout (15s)
     },
     http: {
       port: httpPort,
