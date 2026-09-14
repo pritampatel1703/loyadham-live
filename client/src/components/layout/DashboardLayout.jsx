@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 
-// Navigation items — v3.0 God Level Edition
+// Navigation items — v3.0 God Level Complete
 const NAV = [
   { path: '/dashboard', icon: '📊', label: 'Command Center' },
   { path: '/devices', icon: '📹', label: 'Devices' },
@@ -18,9 +18,16 @@ const NAV = [
   { path: '/teleprompter', icon: '📜', label: 'Teleprompter' },
   { path: '/macros', icon: '⚡', label: 'Macros' },
   { divider: true },
+  { path: '/media', icon: '📁', label: 'Media Manager' },
+  { path: '/ptz', icon: '🎯', label: 'PTZ Control' },
+  { path: '/recording', icon: '⏺️', label: 'Recording' },
+  { path: '/replay', icon: '🔄', label: 'Instant Replay' },
+  { path: '/router', icon: '🔌', label: 'Signal Router' },
+  { divider: true },
   { path: '/events', icon: '📅', label: 'Events' },
   { path: '/analytics', icon: '📈', label: 'Analytics' },
   { path: '/streaming', icon: '📡', label: 'Streaming' },
+  { path: '/restream', icon: '🌐', label: 'Restream' },
   { divider: true },
   { path: '/users', icon: '👥', label: 'Users', admin: true },
   { path: '/settings', icon: '⚙️', label: 'Settings', admin: true },

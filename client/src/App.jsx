@@ -22,6 +22,12 @@ import AudioMixer from './pages/AudioMixer';
 import Multiview from './pages/Multiview';
 import Teleprompter from './pages/Teleprompter';
 import Macros from './pages/Macros';
+import MediaManager from './pages/MediaManager';
+import StreamDistribution from './pages/StreamDistribution';
+import PTZControl from './pages/PTZControl';
+import RecordingManager from './pages/RecordingManager';
+import ReplaySystem from './pages/ReplaySystem';
+import SignalRouter from './pages/SignalRouter';
 
 function AppRoutes() {
   const { loading } = useAuth();
@@ -47,6 +53,12 @@ function AppRoutes() {
         <Route path="multiview" element={<Multiview />} />
         <Route path="teleprompter" element={<Teleprompter />} />
         <Route path="macros" element={<Macros />} />
+        <Route path="media" element={<MediaManager />} />
+        <Route path="restream" element={<StreamDistribution />} />
+        <Route path="ptz" element={<PTZControl />} />
+        <Route path="recording" element={<RecordingManager />} />
+        <Route path="replay" element={<ReplaySystem />} />
+        <Route path="router" element={<SignalRouter />} />
         <Route path="events" element={<Events />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="streaming" element={<Streaming />} />
