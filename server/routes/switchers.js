@@ -237,6 +237,35 @@ router.post('/:id/action', authenticate, requireRole('operator'), async (req, re
     );
 
     const currentStatus = inst.getStatusSync ? inst.getStatusSync() : {};
+
+    // Broadcast to production and device WebSocket clients
+    const io = req.app.get('io');
+    if (io) {
+      let pgm = params?.input || currentStatus?.programInput;
+      let pvw = currentStatus?.previewInput;
+      if (action === 'cut' || action === 'auto') {
+        pgm = currentStatus?.programInput || pgm;
+        pvw = currentStatus?.previewInput || pvw;
+      }
+      const payload = {
+        switcherId: req.params.id,
+        manufacturer: conn.manufacturer,
+        action,
+        params: params || {},
+        status: currentStatus,
+        pgmInput: pgm,
+        pvwInput: pvw,
+      };
+      io.of('/production').emit('switcher:action', payload);
+      if (pgm !== undefined && pgm !== null) {
+        io.of('/production').emit('tally-update', { pgmId: String(pgm), pvwId: pvw ? String(pvw) : null });
+        io.of('/devices').emit('tally-update', { pgmId: String(pgm), pvwId: pvw ? String(pvw) : null });
+      }
+      if (action === 'fadeToBlack') {
+        io.of('/production').emit('switcher:ftb', { fadeToBlack: currentStatus?.fadeToBlack ?? true });
+      }
+    }
+
     res.json({ success: true, action, result, status: currentStatus });
   } catch (err) {
     res.status(500).json({ error: err.message });

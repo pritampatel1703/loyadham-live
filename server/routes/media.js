@@ -410,4 +410,27 @@ router.get('/stats', (req, res) => {
   });
 });
 
+// ═══ Playout to Live Output (PGM) ═══
+router.post('/playout/pgm', (req, res) => {
+  const { fileId } = req.body;
+  const file = mediaFiles.find(f => f.id === fileId);
+  if (!file) return res.status(404).json({ error: 'Media file not found' });
+
+  const io = req.app.get('io');
+  if (io) {
+    io.emit('media:play', file);
+    io.of('/production').emit('media:play', file);
+  }
+  res.json({ success: true, file });
+});
+
+router.post('/playout/stop', (req, res) => {
+  const io = req.app.get('io');
+  if (io) {
+    io.emit('media:stop');
+    io.of('/production').emit('media:stop');
+  }
+  res.json({ success: true });
+});
+
 module.exports = router;

@@ -1271,3 +1271,19 @@ tr:hover td{background:var(--bg-card-hover)}
 @media(max-width:480px){.stats-grid{grid-template-columns:1fr}.modal{min-width:90vw}.switcher-bus-grid{gap:6px}.switcher-trans-row{flex-direction:column}}
 @media(max-width:1200px){.cmd-stats-row{grid-template-columns:1fr 1fr}.cmd-health-grid{grid-template-columns:1fr 1fr}.cmd-bottom-grid{grid-template-columns:1fr 1fr}.cmd-actions-row{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:768px){.cmd-stats-row{grid-template-columns:1fr}.cmd-health-grid{grid-template-columns:1fr}.cmd-bottom-grid{grid-template-columns:1fr}.cmd-actions-row{grid-template-columns:repeat(2,1fr)}.cmd-footer{flex-direction:column;gap:4px}}
+
+/* Broadcast Output Animations */
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes tickerMarquee {
+  0% { transform: translateX(100vw); }
+  100% { transform: translateX(-100%); }
+}

@@ -199,13 +199,19 @@ router.post('/:id/show', (req, res) => {
 
   // Broadcast to all connected clients
   const io = req.app.get('io');
-  if (io) io.emit('graphic:show', liveData);
+  if (io) {
+    io.emit('graphic:show', liveData);
+    io.of('/production').emit('graphic:show', liveData);
+  }
 
   // Auto-hide after duration
   if (tpl.duration > 0) {
     setTimeout(() => {
       delete liveGraphics[tpl.id];
-      if (io) io.emit('graphic:hide', { id: tpl.id });
+      if (io) {
+        io.emit('graphic:hide', { id: tpl.id });
+        io.of('/production').emit('graphic:hide', { id: tpl.id });
+      }
     }, tpl.duration);
   }
 
@@ -215,7 +221,10 @@ router.post('/:id/show', (req, res) => {
 router.post('/:id/hide', (req, res) => {
   delete liveGraphics[req.params.id];
   const io = req.app.get('io');
-  if (io) io.emit('graphic:hide', { id: req.params.id });
+  if (io) {
+    io.emit('graphic:hide', { id: req.params.id });
+    io.of('/production').emit('graphic:hide', { id: req.params.id });
+  }
   res.json({ ok: true });
 });
 
@@ -228,7 +237,10 @@ router.get('/live', (_req, res) => {
 router.post('/hide-all', (req, res) => {
   liveGraphics = {};
   const io = req.app.get('io');
-  if (io) io.emit('graphic:hide-all');
+  if (io) {
+    io.emit('graphic:hide-all');
+    io.of('/production').emit('graphic:hide-all');
+  }
   res.json({ ok: true });
 });
 
@@ -265,14 +277,20 @@ router.post('/logo', (req, res) => {
     enabled: true,
   };
   const io = req.app.get('io');
-  if (io) io.emit('graphic:logo', logoBug);
+  if (io) {
+    io.emit('graphic:logo', logoBug);
+    io.of('/production').emit('graphic:logo', logoBug);
+  }
   res.json({ logo: logoBug });
 });
 
 router.delete('/logo', (req, res) => {
   logoBug = null;
   const io = req.app.get('io');
-  if (io) io.emit('graphic:logo', null);
+  if (io) {
+    io.emit('graphic:logo', null);
+    io.of('/production').emit('graphic:logo', null);
+  }
   res.json({ ok: true });
 });
 

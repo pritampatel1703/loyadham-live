@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { graphicsApi } from '../api/client';
+import { productionSocket } from '../socket';
 
 /* ═══════════════════════════════════════════════════════════
    GRAPHICS ENGINE — Lower Thirds, Overlays, Titles, Tickers
@@ -49,14 +50,26 @@ export default function Graphics() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    productionSocket.connect();
+    return () => {};
+  }, []);
 
   const filteredTemplates = templates.filter(t => filterCat === 'all' || t.category === filterCat);
 
   const showGraphic = async (tpl, override = {}) => {
+    const liveItem = { ...tpl, layers: { ...tpl.layers, ...override }, liveAt: Date.now() };
     try {
+      // Local and socket immediate broadcast
+      productionSocket.emit('graphic:show', liveItem);
+      try {
+        const bc = new BroadcastChannel('pixel_perfect_graphics');
+        bc.postMessage({ type: 'show', graphic: liveItem, timestamp: Date.now() });
+      } catch (_) {}
+
       await graphicsApi.show(tpl.id, override);
-      setLiveGraphics(prev => [...prev.filter(g => g.id !== tpl.id), { ...tpl, liveAt: Date.now() }]);
+      setLiveGraphics(prev => [...prev.filter(g => g.id !== tpl.id), liveItem]);
       if (tpl.duration > 0) {
         setTimeout(() => setLiveGraphics(prev => prev.filter(g => g.id !== tpl.id)), tpl.duration);
       }
@@ -65,6 +78,12 @@ export default function Graphics() {
 
   const hideGraphic = async (id) => {
     try {
+      productionSocket.emit('graphic:hide', { id });
+      try {
+        const bc = new BroadcastChannel('pixel_perfect_graphics');
+        bc.postMessage({ type: 'hide', id, timestamp: Date.now() });
+      } catch (_) {}
+
       await graphicsApi.hide(id);
       setLiveGraphics(prev => prev.filter(g => g.id !== id));
     } catch (e) { console.error(e); }

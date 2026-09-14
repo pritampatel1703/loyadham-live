@@ -98,6 +98,33 @@ function setupWebSocketChannels(io) {
         productionNs.emit('overlay-update', overlay);
       });
 
+      socket.on('graphic:show', (graphic) => {
+        productionNs.emit('graphic:show', graphic);
+      });
+      socket.on('graphic:hide', (data) => {
+        productionNs.emit('graphic:hide', data);
+      });
+      socket.on('graphic:hide-all', () => {
+        productionNs.emit('graphic:hide-all');
+      });
+      socket.on('graphic:logo', (logo) => {
+        productionNs.emit('graphic:logo', logo);
+      });
+
+      socket.on('media:play', (file) => {
+        productionNs.emit('media:play', file);
+      });
+      socket.on('media:stop', () => {
+        productionNs.emit('media:stop');
+      });
+
+      socket.on('switcher:action', (data) => {
+        productionNs.emit('switcher:action', data);
+      });
+      socket.on('switcher:ftb', (data) => {
+        productionNs.emit('switcher:ftb', data);
+      });
+
       socket.on('camera-cmd', ({ deviceId, cmd, payload }) => {
         const targetSocketId = deviceSockets.get(deviceId);
         if (targetSocketId) {

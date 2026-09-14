@@ -139,7 +139,20 @@ router.post('/:id/action', authenticate, requireRole('operator'), async (req, re
 
     await actions[action]();
     await helpers.addLog(null, 'atem', req.user.username, `ATEM Action: ${action}`, JSON.stringify(params || {}));
-    res.json({ success: true, action, status: a.getStatusSync() });
+    const curStatus = a.getStatusSync ? a.getStatusSync() : {};
+    if (io) {
+      if (curStatus.programInput) {
+        io.of('/production').emit('tally-update', { pgmId: String(curStatus.programInput), pvwId: curStatus.previewInput ? String(curStatus.previewInput) : null });
+        io.of('/devices').emit('tally-update', { pgmId: String(curStatus.programInput), pvwId: curStatus.previewInput ? String(curStatus.previewInput) : null });
+      }
+      io.of('/production').emit('atem:tally', {
+        pgmInput: curStatus.programInput,
+        pvwInput: curStatus.previewInput,
+        inTransition: curStatus.inTransition,
+        fadeToBlack: curStatus.fadeToBlack
+      });
+    }
+    res.json({ success: true, action, status: curStatus });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

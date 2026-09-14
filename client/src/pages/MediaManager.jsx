@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { productionSocket } from '../socket';
 
 /* ═══════════════════════════════════════════════════════════
    MEDIA MANAGER — Full Server-Backed File Manager & Playout
@@ -45,6 +46,7 @@ export default function MediaManager() {
   const [savedPlaylists, setSavedPlaylists] = useState([]);
   const [playlistName, setPlaylistName] = useState('');
   const [showSavePlaylist, setShowSavePlaylist] = useState(false);
+  const [pgmMediaId, setPgmMediaId] = useState(null);
   const fileInputRef = useRef(null);
   const audioRef = useRef(null);
   const videoRef = useRef(null);
@@ -54,6 +56,52 @@ export default function MediaManager() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  useEffect(() => {
+    productionSocket.connect();
+    const onMediaPlay = (f) => setPgmMediaId(f?.id || null);
+    const onMediaStop = () => setPgmMediaId(null);
+    productionSocket.on('media:play', onMediaPlay);
+    productionSocket.on('media:stop', onMediaStop);
+    return () => {
+      productionSocket.off('media:play', onMediaPlay);
+      productionSocket.off('media:stop', onMediaStop);
+    };
+  }, []);
+
+  const sendToLivePgm = async (file) => {
+    try {
+      setPgmMediaId(file.id);
+      productionSocket.emit('media:play', file);
+      try {
+        const bc = new BroadcastChannel('pixel_perfect_media');
+        bc.postMessage({ type: 'play', file, timestamp: Date.now() });
+      } catch (_) {}
+      await fetch('/api/media/playout/pgm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: file.id }),
+      });
+      showToast(`Now playing "${file.name}" live on PGM output!`, 'success');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const stopLivePgm = async () => {
+    try {
+      setPgmMediaId(null);
+      productionSocket.emit('media:stop');
+      try {
+        const bc = new BroadcastChannel('pixel_perfect_media');
+        bc.postMessage({ type: 'stop', timestamp: Date.now() });
+      } catch (_) {}
+      await fetch('/api/media/playout/stop', { method: 'POST' });
+      showToast('Live media playout stopped', 'info');
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // ─── Fetch files from API ───
   const fetchFiles = useCallback(async () => {
@@ -533,8 +581,29 @@ export default function MediaManager() {
                   </div>
                 </div>
 
+                {/* Live PGM Playout Button */}
+                <div style={{ marginTop: 8 }}>
+                  {pgmMediaId === sel.id ? (
+                    <button
+                      className="btn btn-sm btn-danger"
+                      style={{ width: '100%', fontWeight: 700, animation: 'pulse 1.5s infinite' }}
+                      onClick={stopLivePgm}
+                    >
+                      ⏹ STOP LIVE PGM PLAYOUT
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-sm"
+                      style={{ width: '100%', background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', color: '#fff', fontWeight: 700 }}
+                      onClick={() => sendToLivePgm(sel)}
+                    >
+                      📡 SEND TO LIVE PGM OUTPUT
+                    </button>
+                  )}
+                </div>
+
                 {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
                   <button className="btn btn-sm btn-primary" style={{ flex: 1 }} onClick={() => addToPlaylist(sel)}>+ Queue</button>
                   <button className="btn btn-sm btn-outline" onClick={() => setEditingFile(sel.id)}>✏️</button>
                   <button className="btn btn-sm btn-outline" onClick={() => setMoveTarget(sel.id)}>📁</button>

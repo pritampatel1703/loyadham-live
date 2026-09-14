@@ -115,6 +115,6 @@ export const graphicsApi = {
   updateTemplate: (id, d) => api(`/api/graphics/templates/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   deleteTemplate: (id) => api(`/api/graphics/templates/${id}`, { method: 'DELETE' }),
   playlists: () => api('/api/graphics/playlists'),
-  show: (id) => api(`/api/graphics/${id}/show`, { method: 'POST' }),
+  show: (id, override = {}) => api(`/api/graphics/${id}/show`, { method: 'POST', body: JSON.stringify({ override }) }),
   hide: (id) => api(`/api/graphics/${id}/hide`, { method: 'POST' }),
 };

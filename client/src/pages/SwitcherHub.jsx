@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { switcherApi, analyticsApi } from '../api/client';
+import { productionSocket } from '../socket';
 
 /* ═══════════════════════════════════════════════════════════
    GOD-LEVEL SWITCHER HUB — v3.0
@@ -103,7 +104,11 @@ export default function SwitcherHub() {
     .then(d => setLogs(d.logs || []))
     .catch(console.error);
 
-  useEffect(() => { loadConns(); loadMfrs(); loadLogs(); }, []);
+  useEffect(() => {
+    loadConns(); loadMfrs(); loadLogs();
+    productionSocket.connect();
+    return () => {};
+  }, []);
 
   // Poll active connection status
   useEffect(() => {
@@ -122,12 +127,56 @@ export default function SwitcherHub() {
 
   // ═══ Actions ═══
   const doAction = async (action, params = {}) => {
-    if (!active) return;
+    // 1. Calculate and immediately dispatch live PGM/PVW update to output screens
+    let newPgm = null;
+    let newPvw = null;
+
+    if (action === 'setProgram') {
+      newPgm = params.input;
+      newPvw = status?.previewInput || null;
+      setStatus(prev => prev ? { ...prev, programInput: params.input } : { programInput: params.input });
+    } else if (action === 'setPreview') {
+      newPvw = params.input;
+      newPgm = status?.programInput || null;
+      setStatus(prev => prev ? { ...prev, previewInput: params.input } : { previewInput: params.input });
+    } else if (action === 'cut' || action === 'auto') {
+      const curPgm = status?.programInput ?? 1;
+      const curPvw = status?.previewInput ?? (curPgm === 1 ? 2 : 1);
+      newPgm = curPvw;
+      newPvw = curPgm;
+      setStatus(prev => prev ? { ...prev, programInput: newPgm, previewInput: newPvw } : { programInput: newPgm, previewInput: newPvw });
+    } else if (action === 'fadeToBlack') {
+      setStatus(prev => prev ? { ...prev, fadeToBlack: !prev.fadeToBlack } : { fadeToBlack: true });
+    }
+
+    // Broadcast instantaneously across WebSockets, BroadcastChannel, and localStorage
+    if (newPgm !== null) {
+      productionSocket.emit('tally-update', { pgmId: String(newPgm), pvwId: newPvw ? String(newPvw) : null });
+      try { localStorage.setItem('pixel_current_pgm', String(newPgm)); } catch (_) {}
+    }
+    productionSocket.emit('switcher:action', { action, params, pgmInput: newPgm, pvwInput: newPvw, timestamp: Date.now() });
+
+    try {
+      const bc = new BroadcastChannel('pixel_perfect_pgm');
+      bc.postMessage({
+        type: 'switcher_action',
+        action,
+        params,
+        pgmId: newPgm ? String(newPgm) : null,
+        pvwId: newPvw ? String(newPvw) : null,
+        timestamp: Date.now(),
+      });
+    } catch (_) {}
+
+    // 2. Execute on hardware switcher API if active
+    if (!active) {
+      addToTimeline(action, params);
+      return;
+    }
     try {
       const res = await switcherApi.action(active, action, params);
       if (res.status) setStatus(res.status);
       loadLogs();
-      // Record to timeline
       addToTimeline(action, params);
     } catch (e) { console.error(e.message); }
   };
