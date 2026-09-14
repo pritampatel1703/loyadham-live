@@ -101,3 +101,20 @@ export const rtmpApi = {
   status: () => api('/api/rtmp/status'),
   streams: () => api('/api/rtmp/streams'),
 };
+
+export const systemApi = {
+  health: () => api('/api/system/health'),
+  disk: () => api('/api/system/disk'),
+  topology: () => api('/api/system/topology'),
+};
+
+export const graphicsApi = {
+  templates: () => api('/api/graphics/templates'),
+  getTemplate: (id) => api(`/api/graphics/templates/${id}`),
+  saveTemplate: (d) => api('/api/graphics/templates', { method: 'POST', body: JSON.stringify(d) }),
+  updateTemplate: (id, d) => api(`/api/graphics/templates/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteTemplate: (id) => api(`/api/graphics/templates/${id}`, { method: 'DELETE' }),
+  playlists: () => api('/api/graphics/playlists'),
+  show: (id) => api(`/api/graphics/${id}/show`, { method: 'POST' }),
+  hide: (id) => api(`/api/graphics/${id}/hide`, { method: 'POST' }),
+};

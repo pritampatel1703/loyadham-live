@@ -17,6 +17,11 @@ import Home from './pages/Home';
 import Watch from './pages/Watch';
 import Output from './pages/Output';
 import ProgramOutput from './pages/ProgramOutput';
+import Graphics from './pages/Graphics';
+import AudioMixer from './pages/AudioMixer';
+import Multiview from './pages/Multiview';
+import Teleprompter from './pages/Teleprompter';
+import Macros from './pages/Macros';
 
 function AppRoutes() {
   const { loading } = useAuth();
@@ -37,6 +42,11 @@ function AppRoutes() {
         <Route path="vmix" element={<VmixControl />} />
         <Route path="atem" element={<AtemControl />} />
         <Route path="switchers" element={<SwitcherHub />} />
+        <Route path="graphics" element={<Graphics />} />
+        <Route path="audio" element={<AudioMixer />} />
+        <Route path="multiview" element={<Multiview />} />
+        <Route path="teleprompter" element={<Teleprompter />} />
+        <Route path="macros" element={<Macros />} />
         <Route path="events" element={<Events />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="streaming" element={<Streaming />} />

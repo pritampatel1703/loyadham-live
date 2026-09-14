@@ -2,14 +2,22 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 
-// Navigation items — v2.1 with SwitcherHub
+// Navigation items — v3.0 God Level Edition
 const NAV = [
-  { path: '/dashboard', icon: '📊', label: 'Dashboard' },
+  { path: '/dashboard', icon: '📊', label: 'Command Center' },
   { path: '/devices', icon: '📹', label: 'Devices' },
   { path: '/production', icon: '🎬', label: 'Production' },
+  { divider: true },
   { path: '/vmix', icon: '🎛️', label: 'vMix Control' },
   { path: '/atem', icon: '🎚️', label: 'Blackmagic ATEM' },
   { path: '/switchers', icon: '🔀', label: 'Switcher Hub' },
+  { divider: true },
+  { path: '/graphics', icon: '🎨', label: 'Graphics Engine' },
+  { path: '/audio', icon: '🎧', label: 'Audio Mixer' },
+  { path: '/multiview', icon: '📺', label: 'Multiview' },
+  { path: '/teleprompter', icon: '📜', label: 'Teleprompter' },
+  { path: '/macros', icon: '⚡', label: 'Macros' },
+  { divider: true },
   { path: '/events', icon: '📅', label: 'Events' },
   { path: '/analytics', icon: '📈', label: 'Analytics' },
   { path: '/streaming', icon: '📡', label: 'Streaming' },
