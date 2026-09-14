@@ -406,21 +406,23 @@ export default function Camera() {
     try {
       const params = sender.getParameters();
       if (!params.encodings) params.encodings = [{}];
-      params.encodings[0].maxBitrate = 8_000_000;       // 8 Mbps cap
+      params.encodings[0].maxBitrate = 15_000_000;      // 15 Mbps for broadcast quality
       params.encodings[0].scaleResolutionDownBy = 1.0;   // Never downscale resolution
       params.encodings[0].networkPriority = 'high';
       params.encodings[0].priority = 'high';
-      // Never drop resolution OR framerate — send full quality always
-      params.degradationPreference = 'disabled';
+      // Maintain full resolution always — drop framerate before resolution
+      params.degradationPreference = 'maintain-resolution';
       sender.setParameters(params).catch(() => {});
     } catch (e) { /* browser may not support all params */ }
   };
 
   // Embed bandwidth hint in SDP (kbps)
   const forceHighBitrateSDP = (sdp) => {
-    const lines = sdp.split('\r\n');
+    // Remove any existing bandwidth limits first
+    let cleaned = sdp.replace(/b=AS:.*\r\n/g, '');
+    const lines = cleaned.split('\r\n');
     const idx = lines.findIndex(l => l.startsWith('m=video'));
-    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:8000');
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:15000');
     return lines.join('\r\n');
   };
 

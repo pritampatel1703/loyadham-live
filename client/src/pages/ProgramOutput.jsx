@@ -6,14 +6,14 @@ import { getIceConfig } from '../webrtc';
 import { devicesApi, rtmpApi } from '../api/client';
 
 /* ═══════════════════════════════════════════════════════════
-   PROGRAM OUTPUT (PGM) — Live Broadcast Clean Feed Engine
+   PROGRAM OUTPUT (PGM) — Clean Live Broadcast Feed
    ═══════════════════════════════════════════════════════════
-   - 100% Real-time Reaction to Switcher Cuts & Auto Transitions
-   - Full Broadcast Graphics Engine (Lower Thirds, Tickers, Scores)
-   - Media Playout Engine (Videos & Graphics from Media Manager)
-   - Live Studio Test Pattern & Camera HUD when hardware inputs active
-   - WebRTC & RTMP Low-Latency Video Ingest
-   - Red Tally Borders, Shutter Cut Flash, and FTB Blackout
+   Pure clean feed for live output. Only renders:
+   - Camera video (WebRTC / RTMP)
+   - Broadcast graphics overlays
+   - Media playout (video/image)
+   - Fade to Black
+   NO HUD, NO borders, NO text, NO background — just the feed.
    ═══════════════════════════════════════════════════════════ */
 
 export default function ProgramOutput() {
@@ -27,36 +27,23 @@ export default function ProgramOutput() {
   const [previousPgmId, setPreviousPgmId] = useState(null);
   const [devices, setDevices] = useState([]);
   const [rtmpStreams, setRtmpStreams] = useState([]);
-  const [activeFeeds, setActiveFeeds] = useState({}); // streamId -> boolean
+  const [activeFeeds, setActiveFeeds] = useState({});
   const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [pgmEverActive, setPgmEverActive] = useState(false);
-  const [clock, setClock] = useState('');
-  const [timecode, setTimecode] = useState('00:00:00:00');
-
-  // Broadcast FX states
-  const [cutFlash, setCutFlash] = useState(false);
   const [fadeToBlack, setFadeToBlack] = useState(false);
-  const [tbarPos, setTbarPos] = useState(0); // 0 to 100
-  const [switcherInfo, setSwitcherInfo] = useState({ name: 'Pixel Switcher', mfr: 'atem' });
-  const [lastActionLabel, setLastActionLabel] = useState('');
 
   // Live Media Playout
-  const [liveMedia, setLiveMedia] = useState(null); // { id, url, name, type, ... }
+  const [liveMedia, setLiveMedia] = useState(null);
 
   // Live Broadcast Graphics Overlays
-  const [liveGraphics, setLiveGraphics] = useState({}); // id -> graphic object
+  const [liveGraphics, setLiveGraphics] = useState({});
   const [logoBug, setLogoBug] = useState(null);
   const [legacyOverlay, setLegacyOverlay] = useState({ active: false, title: '', subtitle: '' });
 
-  // Simulated VU meter levels for live audio visualizer
-  const [vuL, setVuL] = useState(65);
-  const [vuR, setVuR] = useState(62);
-
   // Video element refs
-  const videoRefs = useRef({});       // streamId -> HTMLVideoElement
-  const rtmpVideoRefs = useRef({});   // streamKey -> HTMLVideoElement
-  const rtmpPlayers = useRef({});     // streamKey -> mpegts.Player
-  const rtmpChasers = useRef({});     // streamKey -> setInterval ID
+  const videoRefs = useRef({});
+  const rtmpVideoRefs = useRef({});
+  const rtmpPlayers = useRef({});
+  const rtmpChasers = useRef({});
   const mediaVideoRef = useRef(null);
 
   // WebRTC internals
@@ -70,42 +57,10 @@ export default function ProgramOutput() {
   const devicesRef = useRef(devices);
   devicesRef.current = devices;
 
-  // 1. SMPTE Timecode & Broadcast Clock
-  useEffect(() => {
-    let frame = 0;
-    const interval = setInterval(() => {
-      const now = new Date();
-      setClock(now.toTimeString().split(' ')[0]);
-      frame = (frame + 1) % 60;
-      const h = String(now.getHours()).padStart(2, '0');
-      const m = String(now.getMinutes()).padStart(2, '0');
-      const s = String(now.getSeconds()).padStart(2, '0');
-      const f = String(frame).padStart(2, '0');
-      setTimecode(`${h}:${m}:${s}:${f}`);
-    }, 1000 / 30);
-    return () => clearInterval(interval);
-  }, []);
+  // Track whether any video element has actual playing frames
+  const [hasLiveFrames, setHasLiveFrames] = useState(false);
 
-  // 2. Animated Stereo VU meters for broadcast realism
-  useEffect(() => {
-    const vuInterval = setInterval(() => {
-      const randL = 50 + Math.sin(Date.now() / 240) * 25 + Math.random() * 15;
-      const randR = 48 + Math.cos(Date.now() / 260) * 25 + Math.random() * 15;
-      setVuL(Math.min(95, Math.max(10, Math.round(randL))));
-      setVuR(Math.min(95, Math.max(10, Math.round(randR))));
-    }, 120);
-    return () => clearInterval(vuInterval);
-  }, []);
-
-  // 3. Trigger Cut Flash animation
-  const triggerCutAnimation = useCallback((label = 'CUT') => {
-    setCutFlash(true);
-    setLastActionLabel(label);
-    setTimeout(() => setCutFlash(false), 90);
-    setTimeout(() => setLastActionLabel(''), 2500);
-  }, []);
-
-  // 4. Safe attach stream to video element
+  // ── Safe attach stream to video element ──
   const safeAttachStream = useCallback((el, stream, streamId) => {
     if (!el || !stream) return;
     const hasVideo = stream.getVideoTracks().length > 0;
@@ -121,15 +76,40 @@ export default function ProgramOutput() {
       p.then(() => {
         const isCurrentPgm = (streamId === 'pgm-master') || (streamId === pgmIdRef.current);
         if (isCurrentPgm) el.muted = false;
-      }).catch(err => {
-        console.warn('[ProgramOutput] Autoplay muted fallback:', streamId, err.message);
+      }).catch(() => {
         el.muted = true;
         el.play().catch(() => {});
       });
     }
   }, []);
 
-  // 5. Connect to camera or relay
+  // ── Force high quality on receiver side ──
+  const applyReceiverQuality = useCallback((pc) => {
+    try {
+      pc.getReceivers().forEach(receiver => {
+        if (receiver.track?.kind === 'video') {
+          const params = receiver.getParameters?.();
+          if (params) {
+            // Request max quality from sender
+            receiver.playoutDelayHint = 0;
+          }
+        }
+      });
+    } catch (_) {}
+  }, []);
+
+  // ── Embed bandwidth hint in SDP for high quality ──
+  const forceHighBitrateReceiveSDP = useCallback((sdp) => {
+    // Remove any existing bandwidth limits
+    let cleaned = sdp.replace(/b=AS:.*\r\n/g, '');
+    // Add high bitrate allowance after m=video line
+    const lines = cleaned.split('\r\n');
+    const idx = lines.findIndex(l => l.startsWith('m=video'));
+    if (idx > -1) lines.splice(idx + 1, 0, 'b=AS:15000');
+    return lines.join('\r\n');
+  }, []);
+
+  // ── Connect to camera or relay ──
   const connectToCamera = useCallback(async (streamId) => {
     if (!streamId) return;
     const existing = peerConns.current[streamId];
@@ -157,13 +137,14 @@ export default function ProgramOutput() {
           const el = videoRefs.current[streamId];
           if (el) safeAttachStream(el, stream, streamId);
           setActiveFeeds(prev => ({ ...prev, [streamId]: true }));
-          setPgmEverActive(true);
+          if (streamId === pgmIdRef.current || streamId === 'pgm-master') {
+            setHasLiveFrames(true);
+          }
         };
       } else if (videoEl) {
         safeAttachStream(videoEl, stream, streamId);
       }
       setActiveFeeds(prev => ({ ...prev, [streamId]: true }));
-      setPgmEverActive(true);
     };
 
     pc.onicecandidate = (e) => {
@@ -179,6 +160,9 @@ export default function ProgramOutput() {
     };
 
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        applyReceiverQuality(pc);
+      }
       if (['failed', 'disconnected'].includes(pc.connectionState)) {
         try { pc.close(); } catch (_) {}
         delete peerConns.current[streamId];
@@ -189,9 +173,9 @@ export default function ProgramOutput() {
     };
 
     return pc;
-  }, [safeAttachStream]);
+  }, [safeAttachStream, applyReceiverQuality]);
 
-  // 6. Handle incoming WebRTC offers
+  // ── Handle incoming WebRTC offers ──
   const handleOffer = useCallback(async ({ fromId, sdp, streamId, deviceId }) => {
     const key = streamId || deviceId || (streamId === 'pgm-master' ? 'pgm-master' : pgmIdRef.current);
     if (!key) return;
@@ -216,13 +200,14 @@ export default function ProgramOutput() {
             const el = videoRefs.current[key];
             if (el) safeAttachStream(el, stream, key);
             setActiveFeeds(prev => ({ ...prev, [key]: true }));
-            setPgmEverActive(true);
+            if (key === pgmIdRef.current || key === 'pgm-master') {
+              setHasLiveFrames(true);
+            }
           };
         } else if (videoEl) {
           safeAttachStream(videoEl, stream, key);
         }
         setActiveFeeds(prev => ({ ...prev, [key]: true }));
-        setPgmEverActive(true);
       };
 
       pc.onicecandidate = (e) => {
@@ -237,6 +222,9 @@ export default function ProgramOutput() {
       };
 
       pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          applyReceiverQuality(pc);
+        }
         if (['failed', 'disconnected'].includes(pc.connectionState)) {
           try { pc.close(); } catch (_) {}
           delete peerConns.current[key];
@@ -248,7 +236,10 @@ export default function ProgramOutput() {
     }
 
     try {
-      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      // Force high bitrate in the incoming SDP
+      const highQualitySdp = { ...sdp, sdp: forceHighBitrateReceiveSDP(sdp.sdp || sdp) };
+      const desc = new RTCSessionDescription(typeof highQualitySdp.sdp === 'string' ? highQualitySdp : sdp);
+      await pc.setRemoteDescription(desc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       signalingSocket.emit('answer', { targetId: fromId, sdp: pc.localDescription });
@@ -258,11 +249,11 @@ export default function ProgramOutput() {
         delete iceQueues.current[key];
       }
     } catch (err) {
-      console.error('[ProgramOutput] Offer error:', key, err);
+      console.error('[PGM] Offer error:', key, err);
     }
-  }, [connectToCamera, safeAttachStream]);
+  }, [connectToCamera, safeAttachStream, forceHighBitrateReceiveSDP, applyReceiverQuality]);
 
-  // 7. RTMP Ultra-Low Latency Player
+  // ── RTMP Ultra-Low Latency Player ──
   const startRtmp = useCallback((streamKey) => {
     if (!mpegts.isSupported()) return;
     if (rtmpPlayers.current[streamKey]) return;
@@ -329,7 +320,7 @@ export default function ProgramOutput() {
     }
   }, []);
 
-  // 8. Fetch devices and sources
+  // ── Fetch devices and sources ──
   const loadSources = useCallback(async () => {
     try {
       const [devRes, rtmpRes] = await Promise.all([
@@ -341,12 +332,17 @@ export default function ProgramOutput() {
       devicesRef.current = fetchedDevs;
       setRtmpStreams(rtmpRes.streams || []);
       connectToCamera('pgm-master');
+
+      const currentPgm = pgmIdRef.current;
+      if (currentPgm && currentPgm !== 'pgm-master' && !currentPgm.startsWith('rtmp-')) {
+        connectToCamera(currentPgm);
+      }
     } catch (e) {
-      console.error('[ProgramOutput] Sources error:', e);
+      console.error('[PGM] Sources error:', e);
     }
   }, [connectToCamera]);
 
-  // 9. Centralized Program Switching handler
+  // ── Centralized Program Switching handler ──
   const handlePgmSwitch = useCallback((newId, transitionType = 'cut') => {
     if (!newId || newId === 'null') return;
     const cleanId = String(newId);
@@ -357,14 +353,22 @@ export default function ProgramOutput() {
     pgmIdRef.current = cleanId;
     try { localStorage.setItem('pixel_current_pgm', cleanId); } catch (_) {}
 
-    if (transitionType === 'cut') {
-      triggerCutAnimation(`CUT → CAM ${cleanId}`);
-    } else if (transitionType === 'auto') {
-      triggerCutAnimation(`AUTO DISSOLVE → CAM ${cleanId}`);
+    // Check if the new video element already has frames
+    const isRtmp = cleanId.startsWith('rtmp-');
+    const newVideo = isRtmp ? rtmpVideoRefs.current[cleanId.replace('rtmp-', '')] : videoRefs.current[cleanId];
+    if (newVideo && !newVideo.paused && newVideo.readyState >= 3) {
+      setHasLiveFrames(true);
+    } else {
+      setHasLiveFrames(false);
     }
-  }, [triggerCutAnimation]);
 
-  // 10. Master Socket & Cross-Tab Broadcast Listeners
+    // Connect to camera WebRTC if not RTMP
+    if (!isRtmp && cleanId !== 'pgm-master') {
+      connectToCamera(cleanId);
+    }
+  }, [connectToCamera]);
+
+  // ── Master Socket & Cross-Tab Broadcast Listeners ──
   useEffect(() => {
     const urlToken = searchParams.get('token');
     if (urlToken && urlToken !== 'null' && urlToken !== 'undefined') {
@@ -426,17 +430,10 @@ export default function ProgramOutput() {
         handlePgmSwitch(data.pgmInput, 'cut');
       } else if (data?.action === 'cut') {
         if (data?.pgmInput) handlePgmSwitch(data.pgmInput, 'cut');
-        triggerCutAnimation('CUT EXECUTED');
       } else if (data?.action === 'auto') {
         if (data?.pgmInput) handlePgmSwitch(data.pgmInput, 'auto');
-        triggerCutAnimation('AUTO TRANSITION');
       } else if (data?.action === 'fadeToBlack') {
         setFadeToBlack(prev => !prev);
-      } else if (data?.action === 'setTransitionPosition') {
-        setTbarPos(Math.round((data?.params?.position ?? 0) * 100));
-      }
-      if (data?.manufacturer) {
-        setSwitcherInfo({ name: data.status?.model || data.manufacturer.toUpperCase(), mfr: data.manufacturer });
       }
     };
     productionSocket.on('switcher:action', onSwitcherAction);
@@ -480,7 +477,7 @@ export default function ProgramOutput() {
     productionSocket.on('media:play', onMediaPlay);
     productionSocket.on('media:stop', onMediaStop);
 
-    // BroadcastChannel cross-window sync (instant zero-network loopback)
+    // BroadcastChannel cross-window sync
     let pgmBc, gfxBc, mediaBc;
     try {
       pgmBc = new BroadcastChannel('pixel_perfect_pgm');
@@ -488,10 +485,7 @@ export default function ProgramOutput() {
         const d = e.data;
         if (!d) return;
         if (d.pgmId) handlePgmSwitch(d.pgmId, d.action || 'cut');
-        if (d.action === 'cut') triggerCutAnimation('CUT');
-        if (d.action === 'auto') triggerCutAnimation('AUTO');
         if (d.action === 'ftb' || d.action === 'fadeToBlack') setFadeToBlack(Boolean(d.fadeToBlack));
-        if (d.action === 'tbar' && d.position !== undefined) setTbarPos(Math.round(d.position * 100));
       };
       pgmBc.postMessage({ type: 'request_pgm' });
 
@@ -549,9 +543,9 @@ export default function ProgramOutput() {
       rtmpChasers.current = {};
       Object.keys(rtmpPlayers.current).forEach(stopRtmp);
     };
-  }, [handleOffer, loadSources, handlePgmSwitch, triggerCutAnimation, stopRtmp]);
+  }, [handleOffer, loadSources, handlePgmSwitch, stopRtmp]);
 
-  // 11. RTMP playback trigger
+  // ── RTMP playback trigger ──
   const isRtmpPgm = Boolean(pgmId && String(pgmId).startsWith('rtmp-'));
   const currentRtmpKey = isRtmpPgm ? String(pgmId).replace(/^rtmp-/, '') : null;
 
@@ -561,23 +555,14 @@ export default function ProgramOutput() {
     }
   }, [isRtmpPgm, currentRtmpKey, startRtmp]);
 
-  // 12. Audio unlocking gesture
+  // ── Audio unlocking gesture ──
   const unlockAudioGesture = useCallback(() => {
     setAudioUnlocked(true);
     Object.values(videoRefs.current).forEach(el => {
-      if (el && !el.muted) el.play().catch(() => {});
+      if (el) { el.muted = false; el.play().catch(() => {}); }
     });
-    if (mediaVideoRef.current) mediaVideoRef.current.play().catch(() => {});
+    if (mediaVideoRef.current) { mediaVideoRef.current.muted = false; mediaVideoRef.current.play().catch(() => {}); }
   }, []);
-
-  // Track whether any video element has actual playing frames
-  const [hasLiveFrames, setHasLiveFrames] = useState(false);
-
-  // Active Program Label
-  const activeDevice = devices.find(d => d.id === pgmId || String(d.id) === String(pgmId));
-  const activePgmName = isRtmpPgm
-    ? `RTMP • ${currentRtmpKey}`
-    : (activeDevice?.name || (pgmId ? `CAM ${pgmId}` : 'CAM 1'));
 
   return (
     <div
@@ -601,24 +586,20 @@ export default function ProgramOutput() {
         cursor: 'none',
         userSelect: 'none',
         outline: 'none',
-        boxSizing: 'border-box',
-        border: '5px solid #ef4444', // Red broadcast on-air tally border
-        boxShadow: 'inset 0 0 30px rgba(239, 68, 68, 0.4)',
       }}
     >
-      {/* ── 1. WEBRTC PGM-MASTER VIDEO RELAY (Layered above base studio feed) ── */}
+      {/* ── 1. WEBRTC PGM-MASTER VIDEO ── */}
       <video
         ref={el => { if (el) videoRefs.current['pgm-master'] = el; }}
         autoPlay
-        muted
         playsInline
         onPlaying={(e) => {
-          if (e.target.videoWidth > 0) {
+          if (e.target.videoWidth > 0 && pgmId === 'pgm-master') {
             setHasLiveFrames(true);
             setActiveFeeds(prev => ({ ...prev, 'pgm-master': true }));
           }
         }}
-        onWaiting={() => setHasLiveFrames(false)}
+        onWaiting={() => { if (pgmId === 'pgm-master') setHasLiveFrames(false); }}
         style={{
           position: 'absolute',
           inset: 0,
@@ -627,13 +608,42 @@ export default function ProgramOutput() {
           objectFit: 'contain',
           background: 'transparent',
           zIndex: 20,
-          opacity: hasLiveFrames ? 1 : 0,
+          opacity: (pgmId === 'pgm-master' && hasLiveFrames) ? 1 : 0,
           pointerEvents: 'none',
-          transition: 'opacity 0.2s ease',
+          transition: 'opacity 0.15s ease',
         }}
       />
 
-      {/* ── 2. RTMP STREAMS ── */}
+      {/* ── 2. WEBRTC DEVICE STREAMS ── */}
+      {devices.map(d => {
+        const isCurrent = String(d.id) === String(pgmId);
+        return (
+          <video
+            key={`cam-${d.id}`}
+            ref={el => { if (el) videoRefs.current[d.id] = el; }}
+            autoPlay
+            playsInline
+            onPlaying={(e) => {
+              if (e.target.videoWidth > 0 && isCurrent) setHasLiveFrames(true);
+            }}
+            onWaiting={() => { if (isCurrent) setHasLiveFrames(false); }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              background: 'transparent',
+              opacity: (isCurrent && hasLiveFrames) ? 1 : 0,
+              zIndex: 19,
+              pointerEvents: 'none',
+              transition: 'opacity 0.15s ease',
+            }}
+          />
+        );
+      })}
+
+      {/* ── 3. RTMP STREAMS ── */}
       {rtmpStreams.map(s => {
         const isCurrent = isRtmpPgm && currentRtmpKey === s.streamKey;
         return (
@@ -641,7 +651,6 @@ export default function ProgramOutput() {
             key={s.streamKey}
             ref={el => { if (el) rtmpVideoRefs.current[s.streamKey] = el; }}
             autoPlay
-            muted
             playsInline
             onPlaying={(e) => {
               if (e.target.videoWidth > 0 && isCurrent) setHasLiveFrames(true);
@@ -656,13 +665,13 @@ export default function ProgramOutput() {
               opacity: (isCurrent && hasLiveFrames) ? 1 : 0,
               zIndex: 18,
               pointerEvents: 'none',
-              transition: 'opacity 0.2s ease',
+              transition: 'opacity 0.15s ease',
             }}
           />
         );
       })}
 
-      {/* ── 3. MEDIA MANAGER DIRECT PLAYOUT (Videos / Images / Bumpers) ── */}
+      {/* ── 4. MEDIA PLAYOUT (Videos / Images) ── */}
       {liveMedia && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 35, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {liveMedia.type === 'video' ? (
@@ -681,210 +690,16 @@ export default function ProgramOutput() {
               alt={liveMedia.name}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
-          ) : (
-            <div style={{ textAlign: 'center', color: '#fff' }}>
-              <div style={{ fontSize: '4rem', marginBottom: 12 }}>🎵</div>
-              <div style={{ fontSize: '2rem', fontWeight: 800 }}>{liveMedia.name}</div>
-              <div style={{ fontSize: '1rem', color: '#94a3b8', marginTop: 6 }}>Audio Playout Active</div>
-            </div>
-          )}
-          {/* Playout identifier badge */}
-          <div style={{
-            position: 'absolute',
-            top: 24,
-            left: 24,
-            background: 'rgba(239, 68, 68, 0.9)',
-            color: '#fff',
-            padding: '6px 16px',
-            borderRadius: 6,
-            fontWeight: 800,
-            fontSize: '0.85rem',
-            letterSpacing: '0.05em',
-            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-          }}>
-            ▶ MEDIA PLAYOUT • {liveMedia.name}
-          </div>
+          ) : null}
         </div>
       )}
 
-      {/* ── 4. BROADCAST STUDIO LIVE FEED (Always rendered as base layer unless real video or media active) ── */}
+      {/* ── 5. FADE TO BLACK ── */}
       <div
         style={{
           position: 'absolute',
           inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          padding: '36px 48px',
-          background: 'radial-gradient(ellipse at 50% 40%, #1e1b4b 0%, #090a16 70%, #020208 100%)',
-          color: '#f8fafc',
-          fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-          zIndex: 5,
-        }}
-      >
-          {/* Studio Ambient Grid Lines */}
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            backgroundImage: 'linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px)',
-            backgroundSize: '40px 40px',
-            pointerEvents: 'none',
-          }} />
-
-          {/* Top Bar: On Air Pill, Studio Clock, Timecode */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'rgba(239, 68, 68, 0.95)',
-                padding: '6px 16px',
-                borderRadius: 4,
-                boxShadow: '0 0 20px rgba(239, 68, 68, 0.6)',
-              }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff', animation: 'pulse 1s infinite' }} />
-                <span style={{ fontSize: '0.9rem', fontWeight: 900, letterSpacing: '0.12em', color: '#fff' }}>ON AIR</span>
-              </div>
-              <div style={{ background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 14px', borderRadius: 4, fontSize: '0.85rem', fontWeight: 700, color: '#38bdf8' }}>
-                PGM BUS • INPUT {pgmId}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>SMPTE Timecode</div>
-                <div style={{ fontFamily: 'monospace', fontSize: '1.25rem', fontWeight: 800, color: '#f8fafc', letterSpacing: '0.08em' }}>{timecode}</div>
-              </div>
-              <div style={{ borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 20, textAlign: 'right' }}>
-                <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Studio Clock</div>
-                <div style={{ fontFamily: 'monospace', fontSize: '1.25rem', fontWeight: 800, color: '#a5b4fc' }}>{clock || '--:--:--'}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Center Stage: Huge Camera Display & Audio VU Meters */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 12, margin: 'auto 0' }}>
-            <div style={{
-              width: 140,
-              height: 140,
-              borderRadius: '50%',
-              background: 'radial-gradient(circle, rgba(239,68,68,0.25) 0%, rgba(239,68,68,0.05) 70%)',
-              border: '2px solid rgba(239,68,68,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '3.8rem',
-              marginBottom: 16,
-              boxShadow: '0 0 40px rgba(239,68,68,0.3)',
-            }}>
-              📹
-            </div>
-
-            <h1 style={{ margin: 0, fontSize: '4rem', fontWeight: 900, letterSpacing: '-0.03em', textTransform: 'uppercase', textAlign: 'center', textShadow: '0 4px 20px rgba(0,0,0,0.8)' }}>
-              {activePgmName}
-            </h1>
-
-            <div style={{ marginTop: 8, fontSize: '1.15rem', color: '#cbd5e1', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 }}>
-              Live Studio Camera Signal
-            </div>
-
-            {/* Stereo Audio VU Meters */}
-            <div style={{ marginTop: 28, display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px 24px', borderRadius: 8 }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94a3b8' }}>AUDIO CH 1-2</span>
-              {/* L Channel */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>L</span>
-                <div style={{ width: 140, height: 10, background: '#1e293b', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
-                  <div style={{
-                    width: `${vuL}%`,
-                    height: '100%',
-                    background: vuL > 85 ? '#ef4444' : vuL > 70 ? '#f59e0b' : '#22c55e',
-                    transition: 'width 0.1s ease',
-                  }} />
-                </div>
-              </div>
-              {/* R Channel */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>R</span>
-                <div style={{ width: 140, height: 10, background: '#1e293b', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
-                  <div style={{
-                    width: `${vuR}%`,
-                    height: '100%',
-                    background: vuR > 85 ? '#ef4444' : vuR > 70 ? '#f59e0b' : '#22c55e',
-                    transition: 'width 0.1s ease',
-                  }} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Bar: Switcher Metadata & Signal Quality */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 12, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 18 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                SWITCHER: <strong style={{ color: '#fff' }}>{switcherInfo.name}</strong>
-              </div>
-              <span style={{ color: 'rgba(255,255,255,0.2)' }}>•</span>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                FORMAT: <strong style={{ color: '#fff' }}>1080p 59.94Hz</strong>
-              </div>
-              <span style={{ color: 'rgba(255,255,255,0.2)' }}>•</span>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                COLOR: <strong style={{ color: '#fff' }}>10-Bit Rec.709</strong>
-              </div>
-            </div>
-
-            <div style={{ fontSize: '0.8rem', color: '#4ade80', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }} />
-              SDI LOCKED • PROGRAM FEED SYNCED
-            </div>
-          </div>
-        </div>
-
-      {/* ── 5. TRANSITION CUT FLASH (Visible feedback on CUT) ── */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: '#ffffff',
-          opacity: cutFlash ? 0.85 : 0,
-          pointerEvents: 'none',
-          transition: 'opacity 0.08s ease-out',
-          zIndex: 60,
-        }}
-      />
-
-      {/* ── 6. TRANSITION ACTION HUD POPUP (e.g. CUT → CAM 2) ── */}
-      {lastActionLabel && (
-        <div style={{
-          position: 'absolute',
-          top: 28,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'rgba(15, 23, 42, 0.9)',
-          border: '1px solid rgba(239, 68, 68, 0.8)',
-          color: '#fff',
-          padding: '8px 24px',
-          borderRadius: 8,
-          fontSize: '1rem',
-          fontWeight: 900,
-          letterSpacing: '0.1em',
-          textTransform: 'uppercase',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.8)',
-          zIndex: 70,
-          pointerEvents: 'none',
-        }}>
-          ⚡ {lastActionLabel}
-        </div>
-      )}
-
-      {/* ── 7. FADE TO BLACK (FTB) BLACKOUT OVERLAY ── */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: '#000000',
+          background: '#000',
           opacity: fadeToBlack ? 1 : 0,
           pointerEvents: 'none',
           transition: 'opacity 0.5s ease',
@@ -892,7 +707,7 @@ export default function ProgramOutput() {
         }}
       />
 
-      {/* ── 8. BROADCAST GRAPHICS LAYER (Overlays, Lower Thirds, Tickers) ── */}
+      {/* ── 6. BROADCAST GRAPHICS LAYER ── */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 50 }}>
         {/* Corner Logo Bug */}
         {logoBug && logoBug.enabled && (
@@ -904,13 +719,14 @@ export default function ProgramOutput() {
             left: logoBug.position?.includes('left') ? 36 : 'auto',
             opacity: 0.9,
           }}>
-            <img src={logoBug.url} alt="Logo Bug" style={{ height: logoBug.size || 70, objectFit: 'contain' }} />
+            <img src={logoBug.url} alt="" style={{ height: logoBug.size || 70, objectFit: 'contain' }} />
           </div>
         )}
 
-        {/* Render Active Graphics from Graphics Engine */}
+        {/* Active Graphics from Graphics Engine */}
         {Object.values(liveGraphics).map(gfx => {
           const l = gfx.layers || {};
+
           if (gfx.type === 'lower-third') {
             return (
               <div key={gfx.id} style={{
@@ -931,7 +747,7 @@ export default function ProgramOutput() {
                   letterSpacing: 2,
                   boxShadow: '0 10px 25px rgba(0,0,0,0.6)',
                 }}>
-                  {l.title?.text || 'Speaker Name'}
+                  {l.title?.text || ''}
                 </div>
                 {l.subtitle?.text && (
                   <div style={{
@@ -970,7 +786,7 @@ export default function ProgramOutput() {
                   {l.label?.text || 'BREAKING'}
                 </span>
                 <span style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                  {l.headline?.text || 'Live Breaking News Update'}
+                  {l.headline?.text || ''}
                 </span>
               </div>
             );
@@ -1020,7 +836,7 @@ export default function ProgramOutput() {
                 overflow: 'hidden',
               }}>
                 <div style={{ display: 'inline-block', animation: 'tickerMarquee 20s linear infinite' }}>
-                  {l.text?.text || 'Welcome to the live broadcast!'}
+                  {l.text?.text || ''}
                 </div>
               </div>
             );
@@ -1043,7 +859,7 @@ export default function ProgramOutput() {
               }}>
                 <div style={{ fontSize: '2rem', marginBottom: 8 }}>🙏</div>
                 <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f8fafc', fontStyle: 'italic', lineHeight: 1.4 }}>
-                  "{l.verse?.text || 'Verse text here...'}"
+                  "{l.verse?.text || ''}"
                 </div>
                 {l.reference?.text && (
                   <div style={{ marginTop: 10, fontSize: '1.1rem', color: '#94a3b8', fontWeight: 700 }}>
@@ -1067,7 +883,7 @@ export default function ProgramOutput() {
                 textAlign: 'center',
               }}>
                 <div style={{ fontSize: '3.5rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>
-                  {l.title?.text || 'Title Card'}
+                  {l.title?.text || ''}
                 </div>
                 {l.subtitle?.text && (
                   <div style={{ fontSize: '1.8rem', color: '#94a3b8', marginTop: 12 }}>
@@ -1119,30 +935,6 @@ export default function ProgramOutput() {
           </div>
         )}
       </div>
-
-      {/* ── 9. CLICK TO UNMUTE AUDIO BANNER ── */}
-      {!audioUnlocked && (
-        <div
-          onClick={unlockAudioGesture}
-          style={{
-            position: 'absolute',
-            bottom: 24,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: 'rgba(15, 23, 42, 0.9)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff',
-            padding: '8px 24px',
-            borderRadius: 8,
-            fontSize: '0.85rem',
-            cursor: 'pointer',
-            zIndex: 100,
-            boxShadow: '0 4px 15px rgba(0,0,0,0.6)',
-          }}
-        >
-          🔊 Click anywhere to unmute live broadcast audio • Press F for Fullscreen
-        </div>
-      )}
     </div>
   );
 }

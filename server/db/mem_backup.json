@@ -10,7 +10,7 @@
       "battery_percent": -1,
       "signal_quality": -1,
       "temperature": -1,
-      "stream_resolution": "1920x1080",
+      "stream_resolution": "1080x1920",
       "stream_fps": 30,
       "stream_bitrate": 0,
       "network_type": "",
