@@ -55,6 +55,7 @@ const { initDatabase } = require('./db/database');
   app.use('/api/rtmp', require('./routes/rtmp'));
   app.use('/api/system', require('./routes/system'));
   app.use('/api/graphics', require('./routes/graphics'));
+  app.use('/api/media', require('./routes/media'));
 
   app.set('io', io);
 

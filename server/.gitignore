@@ -1,3 +1,5 @@
 node_modules/
 data/*.db
 .env
+media_uploads/
+db/media_meta.json
