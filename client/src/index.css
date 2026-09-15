@@ -1392,6 +1392,18 @@ tr:hover td{background:var(--bg-card-hover)}
   }
 }
 
+/* 8. Specular Light Sweep (for rendered image overlays) */
+@keyframes aeSpecularSweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* 9. Spin animation (countdown ring) */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Carbon Fiber Texture */
 .ae-carbon-texture {
   background:
