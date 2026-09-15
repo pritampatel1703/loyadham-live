@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import mpegts from 'mpegts.js';
 import { signalingSocket, productionSocket } from '../socket';
 import { getIceConfig } from '../webrtc';
@@ -11,19 +11,21 @@ import { devicesApi, rtmpApi } from '../api/client';
    Pure clean feed for live output. Only renders:
    - Camera video (WebRTC / RTMP)
    - Broadcast graphics overlays
-   - Media playout (video/image)
+   - Media playout (video/image/audio)
    - Fade to Black
    NO HUD, NO borders, NO text, NO background — just the feed.
    ═══════════════════════════════════════════════════════════ */
 
 export default function ProgramOutput() {
+  const { id: routeId } = useParams();
   const [searchParams] = useSearchParams();
   const urlPgm = searchParams.get('pgm');
   const storedPgm = (() => {
     try { return localStorage.getItem('pixel_current_pgm'); } catch (_) { return null; }
   })();
 
-  const [pgmId, setPgmId] = useState(() => (urlPgm && urlPgm !== 'null' && urlPgm !== 'undefined') ? urlPgm : (storedPgm && storedPgm !== 'null' && storedPgm !== 'undefined' ? storedPgm : '1'));
+  const initialPgm = (routeId && routeId !== 'pgm') ? routeId : ((urlPgm && urlPgm !== 'null' && urlPgm !== 'undefined') ? urlPgm : (storedPgm && storedPgm !== 'null' && storedPgm !== 'undefined' ? storedPgm : '1'));
+  const [pgmId, setPgmId] = useState(initialPgm);
   const [previousPgmId, setPreviousPgmId] = useState(null);
   const [devices, setDevices] = useState([]);
   const [rtmpStreams, setRtmpStreams] = useState([]);
@@ -33,6 +35,11 @@ export default function ProgramOutput() {
 
   // Live Media Playout
   const [liveMedia, setLiveMedia] = useState(null);
+  const [mediaError, setMediaError] = useState(false);
+
+  useEffect(() => {
+    setMediaError(false);
+  }, [liveMedia]);
 
   // Live Broadcast Graphics Overlays
   const [liveGraphics, setLiveGraphics] = useState({});
@@ -515,6 +522,23 @@ export default function ProgramOutput() {
     loadSources();
     const pollId = setInterval(loadSources, 15000);
 
+    // Initial state synchronization for graphics & media playout
+    fetch('/api/graphics/live').then(r => r.json()).then(d => {
+      if (d?.graphics && Array.isArray(d.graphics)) {
+        const map = {};
+        d.graphics.forEach(g => { if (g?.id) map[g.id] = g; });
+        setLiveGraphics(prev => ({ ...map, ...prev }));
+      }
+    }).catch(() => {});
+
+    fetch('/api/graphics/logo').then(r => r.json()).then(d => {
+      if (d?.logo) setLogoBug(d.logo);
+    }).catch(() => {});
+
+    fetch('/api/media/playout/current').then(r => r.json()).then(d => {
+      if (d?.media) setLiveMedia(d.media);
+    }).catch(() => {});
+
     return () => {
       clearInterval(pollId);
       if (pgmBc) pgmBc.close();
@@ -671,25 +695,92 @@ export default function ProgramOutput() {
         );
       })}
 
-      {/* ── 4. MEDIA PLAYOUT (Videos / Images) ── */}
+      {/* ── 4. MEDIA PLAYOUT (Videos / Images / Audio) ── */}
       {liveMedia && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 35, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {liveMedia.type === 'video' ? (
-            <video
-              ref={mediaVideoRef}
-              src={liveMedia.url || `/api/media/file/${liveMedia.id}`}
-              autoPlay
-              controls={false}
-              playsInline
-              loop
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-            />
+            <>
+              <video
+                ref={mediaVideoRef}
+                src={liveMedia.url || `/api/media/file/${liveMedia.id}`}
+                autoPlay
+                controls={false}
+                playsInline
+                loop
+                onError={() => setMediaError(true)}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  display: mediaError ? 'none' : 'block'
+                }}
+              />
+              {mediaError && (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '100%',
+                  height: '100%',
+                  background: 'radial-gradient(ellipse at center, #1e1b4b 0%, #020617 80%)',
+                  color: '#fff',
+                  textAlign: 'center',
+                  padding: 40,
+                }}>
+                  <div style={{ fontSize: '4.5rem', marginBottom: 16 }}>🎬</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: 2, textTransform: 'uppercase', color: '#f8fafc' }}>
+                    {liveMedia.name || 'VIDEO PLAYOUT'}
+                  </div>
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    marginTop: 18,
+                    padding: '8px 24px',
+                    borderRadius: 30,
+                    background: 'rgba(59, 130, 246, 0.2)',
+                    border: '1px solid rgba(59, 130, 246, 0.5)',
+                    color: '#60a5fa',
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    letterSpacing: 1.5,
+                  }}>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#3b82f6' }} />
+                    LIVE MEDIA PLAYOUT • {liveMedia.duration ? `${liveMedia.duration}s` : 'ON AIR'}
+                  </div>
+                </div>
+              )}
+            </>
           ) : liveMedia.type === 'image' ? (
             <img
               src={liveMedia.url || `/api/media/file/${liveMedia.id}`}
               alt={liveMedia.name}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
+          ) : liveMedia.type === 'audio' ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              height: '100%',
+              background: 'radial-gradient(ellipse at center, #1e293b 0%, #020617 80%)',
+              color: '#fff',
+              textAlign: 'center',
+            }}>
+              <audio
+                autoPlay
+                loop
+                src={liveMedia.url || `/api/media/file/${liveMedia.id}`}
+              />
+              <div style={{ fontSize: '4.5rem', marginBottom: 16 }}>🎵</div>
+              <div style={{ fontSize: '2.2rem', fontWeight: 900, letterSpacing: 2 }}>{liveMedia.name}</div>
+              <div style={{ color: '#f59e0b', marginTop: 12, fontWeight: 700, letterSpacing: 1.5 }}>
+                AUDIO PLAYOUT ACTIVE
+              </div>
+            </div>
           ) : null}
         </div>
       )}
@@ -726,8 +817,11 @@ export default function ProgramOutput() {
         {/* Active Graphics from Graphics Engine */}
         {Object.values(liveGraphics).map(gfx => {
           const l = gfx.layers || {};
+          const getText = (val, fallback = '') => (val?.text || (typeof val === 'string' ? val : '') || fallback);
 
           if (gfx.type === 'lower-third') {
+            const title = getText(l.title, 'Speaker Name');
+            const subtitle = getText(l.subtitle, 'Title / Designation');
             return (
               <div key={gfx.id} style={{
                 position: 'absolute',
@@ -747,9 +841,9 @@ export default function ProgramOutput() {
                   letterSpacing: 2,
                   boxShadow: '0 10px 25px rgba(0,0,0,0.6)',
                 }}>
-                  {l.title?.text || ''}
+                  {title}
                 </div>
-                {l.subtitle?.text && (
+                {subtitle && (
                   <div style={{
                     background: 'rgba(15, 23, 42, 0.96)',
                     padding: '6px 24px',
@@ -759,7 +853,7 @@ export default function ProgramOutput() {
                     display: 'inline-block',
                     boxShadow: '0 5px 15px rgba(0,0,0,0.5)',
                   }}>
-                    {l.subtitle?.text}
+                    {subtitle}
                   </div>
                 )}
               </div>
@@ -783,10 +877,10 @@ export default function ProgramOutput() {
                 animation: 'slideInUp 0.3s ease-out',
               }}>
                 <span style={{ background: '#000', color: '#fff', padding: '4px 12px', fontWeight: 900, letterSpacing: '0.1em' }}>
-                  {l.label?.text || 'BREAKING'}
+                  {getText(l.label, 'BREAKING')}
                 </span>
                 <span style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                  {l.headline?.text || ''}
+                  {getText(l.headline, 'Live Breaking News Update')}
                 </span>
               </div>
             );
@@ -808,13 +902,13 @@ export default function ProgramOutput() {
                 boxShadow: '0 8px 25px rgba(0,0,0,0.6)',
               }}>
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 800 }}>{l.team1?.text || 'TEAM A'}</div>
-                  <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff' }}>{l.score1?.text || '0'}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 800 }}>{getText(l.team1, 'TEAM A')}</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff' }}>{getText(l.score1, '0')}</div>
                 </div>
                 <div style={{ fontSize: '1.2rem', color: '#64748b' }}>VS</div>
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 800 }}>{l.team2?.text || 'TEAM B'}</div>
-                  <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff' }}>{l.score2?.text || '0'}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 800 }}>{getText(l.team2, 'TEAM B')}</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff' }}>{getText(l.score2, '0')}</div>
                 </div>
               </div>
             );
@@ -836,7 +930,7 @@ export default function ProgramOutput() {
                 overflow: 'hidden',
               }}>
                 <div style={{ display: 'inline-block', animation: 'tickerMarquee 20s linear infinite' }}>
-                  {l.text?.text || ''}
+                  {getText(l.text, 'Welcome to the live broadcast! • Loyadham Live Production Engine')}
                 </div>
               </div>
             );
@@ -859,11 +953,11 @@ export default function ProgramOutput() {
               }}>
                 <div style={{ fontSize: '2rem', marginBottom: 8 }}>🙏</div>
                 <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f8fafc', fontStyle: 'italic', lineHeight: 1.4 }}>
-                  "{l.verse?.text || ''}"
+                  "{getText(l.verse, 'Trust in the Lord with all your heart and lean not on your own understanding.')}"
                 </div>
-                {l.reference?.text && (
+                {getText(l.reference) && (
                   <div style={{ marginTop: 10, fontSize: '1.1rem', color: '#94a3b8', fontWeight: 700 }}>
-                    {l.reference?.text}
+                    {getText(l.reference)}
                   </div>
                 )}
               </div>
@@ -883,13 +977,40 @@ export default function ProgramOutput() {
                 textAlign: 'center',
               }}>
                 <div style={{ fontSize: '3.5rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>
-                  {l.title?.text || ''}
+                  {getText(l.title, 'Special Broadcast Event')}
                 </div>
-                {l.subtitle?.text && (
+                {getText(l.subtitle) && (
                   <div style={{ fontSize: '1.8rem', color: '#94a3b8', marginTop: 12 }}>
-                    {l.subtitle?.text}
+                    {getText(l.subtitle)}
                   </div>
                 )}
+              </div>
+            );
+          }
+
+          if (gfx.type === 'countdown') {
+            return (
+              <div key={gfx.id} style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                background: 'rgba(15, 23, 42, 0.92)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 20,
+                padding: '30px 60px',
+                textAlign: 'center',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+              }}>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#94a3b8', letterSpacing: 4, textTransform: 'uppercase' }}>
+                  {getText(l.label, 'STARTING IN')}
+                </div>
+                <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace', margin: '8px 0' }}>
+                  00:30
+                </div>
+                <div style={{ fontSize: '1.2rem', color: '#cbd5e1', fontWeight: 600 }}>
+                  {getText(l.subtitle, 'Live Broadcast Event')}
+                </div>
               </div>
             );
           }

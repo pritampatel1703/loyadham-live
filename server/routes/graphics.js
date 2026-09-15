@@ -21,7 +21,7 @@ let memTemplates = [
       subtitle: { type: 'text', x: 6, y: 92, text: 'Title / Designation', fontSize: 18, fontWeight: 'normal', color: '#94a3b8', fontFamily: 'Inter' },
     },
     animation: { in: 'slide-left', out: 'slide-left', duration: 500 },
-    duration: 5000,
+    duration: 0,
     created_at: new Date().toISOString(),
   },
   {
@@ -36,7 +36,7 @@ let memTemplates = [
       headline: { type: 'text', x: 20, y: 88, text: 'Headlines go here...', fontSize: 22, fontWeight: '600', color: '#ffffff', fontFamily: 'Inter' },
     },
     animation: { in: 'slide-up', out: 'slide-down', duration: 400 },
-    duration: 8000,
+    duration: 0,
     created_at: new Date().toISOString(),
   },
   {
@@ -51,7 +51,7 @@ let memTemplates = [
       line: { type: 'rect', x: 35, y: 50, width: 30, height: 0.3, color: '#6366f1', opacity: 1 },
     },
     animation: { in: 'fade', out: 'fade', duration: 600 },
-    duration: 4000,
+    duration: 0,
     created_at: new Date().toISOString(),
   },
   {

@@ -218,46 +218,146 @@ router.post('/upload', upload.array('files', 20), (req, res) => {
 router.get('/file/:id', (req, res) => {
   const file = mediaFiles.find(f => f.id === req.params.id);
   if (!file) return res.status(404).json({ error: 'File not found' });
-  if (!file.filePath || !fs.existsSync(file.filePath)) {
-    return res.status(404).json({ error: 'File not on disk (demo file)', isDemo: !!file.isDemo });
+
+  // If real file on disk, stream it
+  if (file.filePath && fs.existsSync(file.filePath)) {
+    const ext = path.extname(file.filePath).toLowerCase();
+    const mimeMap = {
+      '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
+      '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.ts': 'video/mp2t',
+      '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac',
+      '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.svg': 'image/svg+xml', '.bmp': 'image/bmp',
+    };
+    const stat = fs.statSync(file.filePath);
+    const mime = mimeMap[ext] || 'application/octet-stream';
+
+    // Support range requests for video/audio seeking
+    const range = req.headers.range;
+    if (range && (file.type === 'video' || file.type === 'audio')) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+      const chunksize = end - start + 1;
+      const stream = fs.createReadStream(file.filePath, { start, end });
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': mime,
+      });
+      return stream.pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': stat.size,
+        'Content-Type': mime,
+        'Cache-Control': 'public, max-age=86400',
+      });
+      return fs.createReadStream(file.filePath).pipe(res);
+    }
   }
 
-  const ext = path.extname(file.filePath).toLowerCase();
-  const mimeMap = {
-    '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
-    '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.ts': 'video/mp2t',
-    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac',
-    '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif', '.svg': 'image/svg+xml', '.bmp': 'image/bmp',
-  };
+  // Fallback for demo images: Return high-resolution broadcast SVG graphic
+  if (file.type === 'image') {
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    
+    if (file.id === 'm3' || file.name.includes('lower_third')) {
+      const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="ltGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0f172a" stop-opacity="0.96"/>
+      <stop offset="70%" stop-color="#1e293b" stop-opacity="0.94"/>
+      <stop offset="100%" stop-color="#334155" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="goldBar" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="80" y="850" width="760" height="120" rx="8" fill="url(#ltGrad)"/>
+    <rect x="80" y="850" width="12" height="120" rx="4" fill="url(#goldBar)"/>
+    <text x="120" y="905" fill="#ffffff" font-family="'Segoe UI', Roboto, sans-serif" font-size="36" font-weight="900" letter-spacing="1.5">LOYADHAM BROADCAST</text>
+    <text x="120" y="945" fill="#38bdf8" font-family="'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="600" letter-spacing="1">LIVE STUDIO PRODUCTION • MEDIA PLAYOUT</text>
+  </g>
+</svg>`;
+      return res.send(svg);
+    }
 
-  const stat = fs.statSync(file.filePath);
-  const mime = mimeMap[ext] || 'application/octet-stream';
+    if (file.id === 'm5' || file.name.includes('sponsor')) {
+      const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200">
+  <defs>
+    <linearGradient id="bgG" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="goldG" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="200" rx="16" fill="url(#bgG)" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+  <circle cx="90" cy="100" r="50" fill="url(#goldG)"/>
+  <text x="90" y="112" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="38" font-weight="900">⚡</text>
+  <text x="170" y="95" fill="#ffffff" font-family="sans-serif" font-size="32" font-weight="900" letter-spacing="2">PIXEL PERFECT</text>
+  <text x="170" y="130" fill="#94a3b8" font-family="sans-serif" font-size="18" font-weight="700" letter-spacing="1.5">OFFICIAL MEDIA SPONSOR</text>
+</svg>`;
+      return res.send(svg);
+    }
 
-  // Support range requests for video/audio seeking
-  const range = req.headers.range;
-  if (range && (file.type === 'video' || file.type === 'audio')) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-    const chunksize = end - start + 1;
-    const stream = fs.createReadStream(file.filePath, { start, end });
-    res.writeHead(206, {
-      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunksize,
-      'Content-Type': mime,
-    });
-    stream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      'Content-Length': stat.size,
-      'Content-Type': mime,
-      'Cache-Control': 'public, max-age=86400',
-    });
-    fs.createReadStream(file.filePath).pipe(res);
+    if (file.id === 'm10' || file.name.includes('verse')) {
+      const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="verseBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020617" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="vShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="20" stdDeviation="25" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+  <g filter="url(#vShadow)">
+    <rect x="360" y="760" width="1200" height="220" rx="20" fill="url(#verseBg)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+    <text x="960" y="825" text-anchor="middle" fill="#f59e0b" font-family="sans-serif" font-size="36">🕉️</text>
+    <text x="960" y="875" text-anchor="middle" fill="#ffffff" font-family="'Georgia', serif" font-size="32" font-weight="600" font-style="italic">
+      "Whenever you are in doubt, meditate upon the divine light within."
+    </text>
+    <text x="960" y="930" text-anchor="middle" fill="#38bdf8" font-family="sans-serif" font-size="20" font-weight="700" letter-spacing="2">
+      — LOYADHAM DAILY SPIRITUAL INSPIRATION
+    </text>
+  </g>
+</svg>`;
+      return res.send(svg);
+    }
+
+    // Generic demo image
+    const genericSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <rect width="1920" height="1080" fill="#0f172a"/>
+  <rect x="200" y="200" width="1520" height="680" rx="24" fill="#1e293b" stroke="#38bdf8" stroke-width="4"/>
+  <text x="960" y="520" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="54" font-weight="900">${file.name}</text>
+  <text x="960" y="590" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="28">MEDIA MANAGER • ACTIVE PLAYOUT</text>
+</svg>`;
+    return res.send(genericSvg);
   }
+
+  // If video/audio demo file without disk asset
+  res.status(200).json({
+    isDemo: true,
+    id: file.id,
+    name: file.name,
+    type: file.type,
+    duration: file.duration,
+    message: 'Demo media playout active'
+  });
 });
 
 // ─── PUT /api/media/:id — Update file metadata ───
@@ -411,11 +511,18 @@ router.get('/stats', (req, res) => {
 });
 
 // ═══ Playout to Live Output (PGM) ═══
+let currentLiveMedia = null;
+
+router.get('/playout/current', (_req, res) => {
+  res.json({ media: currentLiveMedia });
+});
+
 router.post('/playout/pgm', (req, res) => {
   const { fileId } = req.body;
   const file = mediaFiles.find(f => f.id === fileId);
   if (!file) return res.status(404).json({ error: 'Media file not found' });
 
+  currentLiveMedia = file;
   const io = req.app.get('io');
   if (io) {
     io.emit('media:play', file);
@@ -425,6 +532,7 @@ router.post('/playout/pgm', (req, res) => {
 });
 
 router.post('/playout/stop', (req, res) => {
+  currentLiveMedia = null;
   const io = req.app.get('io');
   if (io) {
     io.emit('media:stop');

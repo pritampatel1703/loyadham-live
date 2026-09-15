@@ -55,6 +55,9 @@ function setupWebSocketChannels(io) {
   // In-memory state for active production feed and graphics
   let currentTally = { pgmId: null, pvwId: null };
   let currentOverlay = { active: false, title: 'Loyadham Live', subtitle: 'Global Broadcast' };
+  let currentLiveGraphics = {};
+  let currentLogoBug = null;
+  let currentLiveMedia = null;
 
   const productionNs = io.of('/production');
   productionNs.on('connection', async (socket) => {
@@ -64,10 +67,21 @@ function setupWebSocketChannels(io) {
       const ae = await helpers.getActiveEvent();
       if (ae) socket.emit('event:active', { event: ae });
 
-      // Immediately send active PGM/PVW and overlay to newly opened windows/monitors
+      // Immediately send active PGM/PVW, overlay, graphics, and media to newly opened windows
       socket.emit('tally-update', currentTally);
       if (currentTally.pgmId) socket.emit('device:tally', { deviceId: currentTally.pgmId, state: 'program' });
       socket.emit('overlay-update', currentOverlay);
+
+      // Send all currently active live graphics
+      Object.values(currentLiveGraphics).forEach(gfx => {
+        socket.emit('graphic:show', gfx);
+      });
+      if (currentLogoBug) {
+        socket.emit('graphic:logo', currentLogoBug);
+      }
+      if (currentLiveMedia) {
+        socket.emit('media:play', currentLiveMedia);
+      }
       
       socket.on('get-tally', () => {
         socket.emit('tally-update', currentTally);
@@ -99,22 +113,32 @@ function setupWebSocketChannels(io) {
       });
 
       socket.on('graphic:show', (graphic) => {
+        if (graphic && graphic.id) {
+          currentLiveGraphics[graphic.id] = graphic;
+        }
         productionNs.emit('graphic:show', graphic);
       });
       socket.on('graphic:hide', (data) => {
+        if (data && data.id) {
+          delete currentLiveGraphics[data.id];
+        }
         productionNs.emit('graphic:hide', data);
       });
       socket.on('graphic:hide-all', () => {
+        currentLiveGraphics = {};
         productionNs.emit('graphic:hide-all');
       });
       socket.on('graphic:logo', (logo) => {
+        currentLogoBug = logo;
         productionNs.emit('graphic:logo', logo);
       });
 
       socket.on('media:play', (file) => {
+        currentLiveMedia = file;
         productionNs.emit('media:play', file);
       });
       socket.on('media:stop', () => {
+        currentLiveMedia = null;
         productionNs.emit('media:stop');
       });
 

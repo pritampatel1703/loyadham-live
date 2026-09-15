@@ -38,8 +38,9 @@ function AppRoutes() {
       <Route path="/camera" element={<Camera />} />
       <Route path="/home" element={<Home />} />
       <Route path="/watch" element={<Watch />} />
+      <Route path="/output" element={<ProgramOutput />} />
       <Route path="/output/pgm" element={<ProgramOutput />} />
-      <Route path="/output/:id" element={<Output />} />
+      <Route path="/output/:id" element={<ProgramOutput />} />
       <Route path="/" element={<DashboardLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />

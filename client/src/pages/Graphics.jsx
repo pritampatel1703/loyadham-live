@@ -44,8 +44,12 @@ export default function Graphics() {
 
   const load = async () => {
     try {
-      const res = await graphicsApi.templates();
+      const [res, liveRes] = await Promise.all([
+        graphicsApi.templates(),
+        graphicsApi.live().catch(() => ({ graphics: [] }))
+      ]);
       setTemplates(res.templates || []);
+      setLiveGraphics(liveRes.graphics || []);
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -53,7 +57,28 @@ export default function Graphics() {
   useEffect(() => {
     load();
     productionSocket.connect();
-    return () => {};
+
+    const onShow = (gfx) => {
+      if (gfx?.id) {
+        setLiveGraphics(prev => [...prev.filter(g => g.id !== gfx.id), gfx]);
+      }
+    };
+    const onHide = (data) => {
+      if (data?.id) {
+        setLiveGraphics(prev => prev.filter(g => g.id !== data.id));
+      }
+    };
+    const onHideAll = () => setLiveGraphics([]);
+
+    productionSocket.on('graphic:show', onShow);
+    productionSocket.on('graphic:hide', onHide);
+    productionSocket.on('graphic:hide-all', onHideAll);
+
+    return () => {
+      productionSocket.off('graphic:show', onShow);
+      productionSocket.off('graphic:hide', onHide);
+      productionSocket.off('graphic:hide-all', onHideAll);
+    };
   }, []);
 
   const filteredTemplates = templates.filter(t => filterCat === 'all' || t.category === filterCat);
