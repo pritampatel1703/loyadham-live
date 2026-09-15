@@ -830,16 +830,16 @@ tr:hover td{background:var(--bg-card-hover)}
 .gfx-cat-btn{padding:4px 12px;border-radius:20px;font-size:.7rem;font-weight:600;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted);cursor:pointer;transition:all .2s}
 .gfx-cat-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .gfx-library{display:flex;flex-direction:column;gap:12px}
-.gfx-library-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.gfx-template-list{display:flex;flex-direction:column;gap:8px;max-height:600px;overflow-y:auto}
-.gfx-template-card{display:flex;gap:12px;padding:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;align-items:center}
+.gfx-library-grid{display:grid;grid-template-columns:460px 1fr;gap:16px}
+.gfx-template-list{display:flex;flex-direction:column;gap:8px;max-height:650px;overflow-y:auto}
+.gfx-template-card{display:flex;gap:12px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);cursor:pointer;transition:all .2s;align-items:center}
 .gfx-template-card:hover{border-color:var(--accent)}
 .gfx-template-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.gfx-tpl-preview-mini{width:120px;height:68px;flex-shrink:0;border-radius:var(--radius);overflow:hidden}
+.gfx-tpl-preview-mini{width:120px;height:68px;flex-shrink:0;border-radius:var(--radius);overflow:hidden;border:1px solid rgba(255,255,255,0.1)}
 .gfx-tpl-preview-mini>div{transform:scale(1);transform-origin:top left}
-.gfx-tpl-info{flex:1;min-width:0}
+.gfx-tpl-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .gfx-tpl-name{font-weight:700;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gfx-tpl-meta{display:flex;gap:6px;margin-top:4px;align-items:center}
+.gfx-tpl-meta{display:flex;gap:6px;margin-top:2px;align-items:center}
 .gfx-tpl-type{padding:2px 8px;border-radius:10px;font-size:.6rem;font-weight:700}
 .gfx-tpl-cat{font-size:.6rem;color:var(--text-muted)}
 .gfx-tpl-actions{display:flex;gap:4px;flex-shrink:0}
@@ -1272,7 +1272,7 @@ tr:hover td{background:var(--bg-card-hover)}
 @media(max-width:1200px){.cmd-stats-row{grid-template-columns:1fr 1fr}.cmd-health-grid{grid-template-columns:1fr 1fr}.cmd-bottom-grid{grid-template-columns:1fr 1fr}.cmd-actions-row{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:768px){.cmd-stats-row{grid-template-columns:1fr}.cmd-health-grid{grid-template-columns:1fr}.cmd-bottom-grid{grid-template-columns:1fr}.cmd-actions-row{grid-template-columns:repeat(2,1fr)}.cmd-footer{flex-direction:column;gap:4px}}
 
-/* Broadcast Output Animations */
+/* Broadcast Output Animations & After Effects Motion Graphics System */
 @keyframes slideInLeft {
   from { transform: translateX(-100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -1283,7 +1283,147 @@ tr:hover td{background:var(--bg-card-hover)}
   to { transform: translateY(0); opacity: 1; }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 @keyframes tickerMarquee {
   0% { transform: translateX(100vw); }
   100% { transform: translateX(-100%); }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   AFTER EFFECTS MOTION GRAPHICS ENGINE (BROADCAST VFX SUITE)
+   ═══════════════════════════════════════════════════════════ */
+
+/* 1. Specular Light Sweep / Laser Sheen */
+@keyframes aeLightSweep {
+  0% { transform: translateX(-160%) skewX(-30deg); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateX(260%) skewX(-30deg); opacity: 0; }
+}
+
+.ae-sweep-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.ae-sweep-wrap::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: 0;
+  width: 50%;
+  height: 200%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+  animation: aeLightSweep 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* 2. 3D Spatial Entrance */
+@keyframes aeSpatialIn {
+  0% {
+    transform: perspective(1000px) rotateY(-22deg) rotateX(8deg) translateX(-120px) scale(0.88);
+    opacity: 0;
+    filter: blur(10px);
+  }
+  60% {
+    transform: perspective(1000px) rotateY(4deg) rotateX(-2deg) translateX(10px) scale(1.02);
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    transform: perspective(1000px) rotateY(0deg) rotateX(0deg) translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+/* 3. 3D Banner Slide */
+@keyframes aeBannerSlide {
+  0% {
+    transform: perspective(800px) rotateX(35deg) translateY(120%);
+    opacity: 0;
+    filter: blur(6px);
+  }
+  100% {
+    transform: perspective(800px) rotateX(0deg) translateY(0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+/* 4. Radar & Halo Spin */
+@keyframes aeRadarSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 5. Golden Shimmer & Ambient Aura */
+@keyframes aeGoldAura {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(245, 158, 11, 0.4), 0 0 50px rgba(217, 119, 6, 0.2), inset 0 0 15px rgba(254, 240, 138, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 45px rgba(245, 158, 11, 0.7), 0 0 80px rgba(217, 119, 6, 0.4), inset 0 0 25px rgba(254, 240, 138, 0.4);
+  }
+}
+
+/* 6. Cyan Cyber Neon Aura */
+@keyframes aeCyberAura {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.5), 0 0 40px rgba(6, 182, 212, 0.25), inset 0 0 12px rgba(34, 211, 238, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(6, 182, 212, 0.8), 0 0 70px rgba(6, 182, 212, 0.5), inset 0 0 20px rgba(34, 211, 238, 0.5);
+  }
+}
+
+/* 7. Red Alert Pulse */
+@keyframes aeRedAlertAura {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(239, 68, 68, 0.6), 0 0 60px rgba(220, 38, 38, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 45px rgba(239, 68, 68, 0.9), 0 0 90px rgba(220, 38, 38, 0.6);
+  }
+}
+
+/* Carbon Fiber Texture */
+.ae-carbon-texture {
+  background:
+    radial-gradient(black 15%, transparent 16%) 0 0,
+    radial-gradient(black 15%, transparent 16%) 6px 6px,
+    radial-gradient(rgba(255,255,255,.08) 15%, transparent 20%) 0 1px,
+    radial-gradient(rgba(255,255,255,.08) 15%, transparent 20%) 6px 7px;
+  background-color: #0b0f19;
+  background-size: 12px 12px;
+}
+
+/* 24K Polished Gold Gradient Text */
+.ae-text-gold {
+  background: linear-gradient(135deg, #fef08a 0%, #f59e0b 35%, #d97706 70%, #fef3c7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.8));
+}
+
+/* Cyber Neon Gradient Text */
+.ae-text-cyber {
+  background: linear-gradient(135deg, #ffffff 0%, #38bdf8 40%, #06b6d4 70%, #e0f2fe 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 12px rgba(6, 182, 212, 0.6));
+}
+
+/* Titanium Chrome Gradient Text */
+.ae-text-chrome {
+  background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 45%, #94a3b8 55%, #f8fafc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,0.9));
+}
+

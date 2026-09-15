@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { graphicsApi } from '../api/client';
 import { productionSocket } from '../socket';
+import BroadcastGraphicItem from '../components/BroadcastGraphicsOverlay';
 
 /* ═══════════════════════════════════════════════════════════
    GRAPHICS ENGINE — Lower Thirds, Overlays, Titles, Tickers
@@ -214,14 +215,33 @@ export default function Graphics() {
     } catch (e) { console.error(e); }
   };
 
-  // ── Render Rich Broadcast Preview on 16:9 Canvas ──
-  const renderPreview = (tpl, textOverrides = {}) => {
-    if (!tpl?.layers) return null;
-    const l = tpl.layers;
-    const getText = (key, fallback = '') => {
-      if (textOverrides[key] !== undefined) return textOverrides[key];
-      return l[key]?.text || (typeof l[key] === 'string' ? l[key] : '') || fallback;
+  // ── Render Rich Broadcast Preview on 16:9 Canvas (After Effects Suite) ──
+  const renderPreview = (tpl, textOverrides = {}, customScale = null) => {
+    if (!tpl) return null;
+
+    // Deep clone / merge text overrides into layers
+    const mergedLayers = {};
+    for (const [key, val] of Object.entries(tpl.layers || {})) {
+      if (val && typeof val === 'object') {
+        mergedLayers[key] = { ...val };
+      } else {
+        mergedLayers[key] = { text: val };
+      }
+    }
+    for (const [key, val] of Object.entries(textOverrides)) {
+      if (mergedLayers[key]) {
+        mergedLayers[key] = { ...mergedLayers[key], text: val };
+      } else {
+        mergedLayers[key] = { text: val };
+      }
+    }
+
+    const mergedGfx = {
+      ...tpl,
+      layers: mergedLayers,
     };
+
+    const effectiveScale = customScale !== null ? customScale : 0.85;
 
     return (
       <div className="gfx-preview-canvas" style={{
@@ -238,236 +258,24 @@ export default function Graphics() {
         <div style={{
           position: 'absolute',
           inset: 0,
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+          background: 'linear-gradient(135deg, #090d16 0%, #111827 50%, #030712 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          opacity: 0.6
+          opacity: 0.7
         }}>
-          <div style={{ fontSize: '3rem', opacity: 0.2 }}>🎥</div>
-        </div>
-
-        {/* 1. LOWER THIRD */}
-        {tpl.type === 'lower-third' && (
-          <div style={{
-            position: 'absolute',
-            bottom: '10%',
-            left: '6%',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.8))'
-          }}>
-            {getText('badge') && (
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                alignSelf: 'flex-start',
-                background: 'rgba(15, 23, 42, 0.96)',
-                borderLeft: `3px solid ${l.accentBar?.color || '#ef4444'}`,
-                padding: '2px 8px',
-                color: '#fff',
-                fontSize: '.65rem',
-                fontWeight: 800,
-                letterSpacing: 1,
-                textTransform: 'uppercase',
-              }}>
-                {getText('badge')}
-              </div>
-            )}
-            <div style={{
-              background: l.accentBar?.color || '#dc2626',
-              padding: '4px 16px',
-              color: '#ffffff',
-              fontSize: '1rem',
-              fontWeight: 900,
-              textTransform: 'uppercase',
-              letterSpacing: 1,
-            }}>
-              {getText('title', 'Speaker Name')}
-            </div>
-            {getText('subtitle') && (
-              <div style={{
-                background: 'rgba(15, 23, 42, 0.94)',
-                padding: '3px 14px',
-                color: '#cbd5e1',
-                fontSize: '.7rem',
-                fontWeight: 600,
-              }}>
-                {getText('subtitle')}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 2. BANNER */}
-        {tpl.type === 'banner' && (
-          <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: 'rgba(220, 38, 38, 0.95)',
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            padding: '6px 14px',
-            gap: 10,
-          }}>
-            <span style={{ background: '#000', color: '#fff', padding: '2px 6px', fontWeight: 900, fontSize: '.65rem', letterSpacing: 1 }}>
-              {getText('label', 'BREAKING')}
-            </span>
-            <span style={{ fontSize: '.75rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {getText('headline', 'Live Breaking News Update')}
-            </span>
-          </div>
-        )}
-
-        {/* 3. SCORE BUG */}
-        {tpl.type === 'score' && (
-          <div style={{
-            position: 'absolute',
-            top: 14,
-            left: 14,
-            background: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 6,
-            padding: '6px 12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '.55rem', color: '#94a3b8', fontWeight: 800 }}>{getText('team1', 'TEAM A')}</div>
-              <div style={{ fontSize: '1rem', fontWeight: 900, color: '#fff' }}>{getText('score1', '0')}</div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-              <span style={{ fontSize: '.6rem', color: '#64748b', fontWeight: 800 }}>VS</span>
-              {getText('clock') && (
-                <span style={{ background: '#ef444430', color: '#ef4444', fontSize: '.5rem', padding: '1px 4px', borderRadius: 2, fontWeight: 900, fontFamily: 'monospace' }}>
-                  {getText('clock')}
-                </span>
-              )}
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '.55rem', color: '#94a3b8', fontWeight: 800 }}>{getText('team2', 'TEAM B')}</div>
-              <div style={{ fontSize: '1rem', fontWeight: 900, color: '#fff' }}>{getText('score2', '0')}</div>
-            </div>
-          </div>
-        )}
-
-        {/* 4. TICKER */}
-        {tpl.type === 'ticker' && (
-          <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: 'rgba(15, 23, 42, 0.95)',
-            borderTop: '2px solid #38bdf8',
-            display: 'flex',
-            alignItems: 'center',
-          }}>
-            <div style={{ background: '#38bdf8', color: '#0f172a', fontWeight: 900, fontSize: '.6rem', padding: '4px 8px', letterSpacing: 1 }}>
-              {getText('label', 'LIVE')}
-            </div>
-            <div style={{ flex: 1, padding: '4px 8px', fontSize: '.68rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {getText('text', 'Welcome to the live broadcast!')}
-            </div>
-          </div>
-        )}
-
-        {/* 5. VERSE / SHLOKA */}
-        {tpl.type === 'verse' && (
-          <div style={{
-            position: 'absolute',
-            bottom: '12%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: '85%',
-            background: 'rgba(15, 23, 42, 0.94)',
-            border: '1px solid rgba(245, 158, 11, 0.6)',
-            borderRadius: 8,
-            padding: '12px 16px',
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '1rem', marginBottom: 2 }}>🕉️ 🙏</div>
-            <div style={{ fontSize: '.75rem', fontWeight: 600, color: '#fef3c7', fontStyle: 'italic', lineHeight: 1.3 }}>
-              "{getText('verse', 'Sacred Updesh & Shloka')}"
-            </div>
-            {getText('reference') && (
-              <div style={{ marginTop: 4, fontSize: '.6rem', color: '#fbbf24', fontWeight: 700 }}>
-                {getText('reference')}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 6. FULL SCREEN TITLE */}
-        {tpl.type === 'title' && (
+          {/* Studio grid / lens flare lines */}
           <div style={{
             position: 'absolute',
             inset: 0,
-            background: 'radial-gradient(ellipse at center, rgba(30, 27, 75, 0.95) 0%, rgba(2, 6, 23, 0.98) 100%)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-            padding: 16,
-          }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: '#fff', letterSpacing: 1, textTransform: 'uppercase' }}>
-              {getText('title', 'Special Event Title')}
-            </div>
-            {getText('subtitle') && (
-              <div style={{ fontSize: '.75rem', color: '#93c5fd', marginTop: 4 }}>
-                {getText('subtitle')}
-              </div>
-            )}
-          </div>
-        )}
+            backgroundImage: 'radial-gradient(circle at 50% 40%, rgba(59, 130, 246, 0.15), transparent 70%), linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)',
+            backgroundSize: '100% 100%, 30px 30px, 30px 30px',
+          }} />
+          <div style={{ fontSize: '2.5rem', opacity: 0.15 }}>🎥</div>
+        </div>
 
-        {/* 7. COUNTDOWN */}
-        {tpl.type === 'countdown' && (
-          <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            background: 'rgba(15, 23, 42, 0.95)',
-            border: '1.5px solid rgba(56, 189, 248, 0.5)',
-            borderRadius: 12,
-            padding: '12px 24px',
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '.6rem', fontWeight: 800, color: '#94a3b8', letterSpacing: 2 }}>
-              {getText('label', 'STARTING IN')}
-            </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace', margin: '2px 0' }}>
-              {tpl.id?.includes('10s') ? '00:10' : '00:30'}
-            </div>
-            <div style={{ fontSize: '.65rem', color: '#cbd5e1' }}>
-              {getText('subtitle', 'Loyadham Live Studio')}
-            </div>
-          </div>
-        )}
-
-        {/* Fallback for legacy custom rect/text */}
-        {Object.entries(l).map(([k, layer]) => {
-          if (layer?.type === 'rect') {
-            return (
-              <div key={k} style={{
-                position: 'absolute',
-                left: `${layer.x}%`, top: `${layer.y}%`,
-                width: `${layer.width}%`, height: `${layer.height}%`,
-                background: layer.color,
-                opacity: layer.opacity || 1,
-                borderRadius: layer.borderRadius || 0,
-              }} />
-            );
-          }
-          return null;
-        })}
+        {/* Real After Effects Motion Graphics Overlay */}
+        <BroadcastGraphicItem gfx={mergedGfx} scale={effectiveScale} isPreview={true} />
       </div>
     );
   };
@@ -646,47 +454,51 @@ export default function Graphics() {
                       style={isLive ? { borderColor: '#ef4444', boxShadow: '0 0 10px rgba(239,68,68,0.25)' } : {}}
                       onClick={() => setSelectedTpl(tpl)}>
                       <div className="gfx-tpl-preview-mini">
-                        {renderPreview(tpl)}
+                        {renderPreview(tpl, {}, 0.42)}
                       </div>
-                      <div className="gfx-tpl-info">
-                        <div className="gfx-tpl-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span>{tpl.name}</span>
+                      <div className="gfx-tpl-info" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <span style={{ fontWeight: 800, fontSize: '.84rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {tpl.name}
+                          </span>
                           {isLive && (
-                            <span style={{ background: '#ef4444', color: '#fff', padding: '1px 5px', borderRadius: 3, fontSize: '.55rem', fontWeight: 900 }}>
+                            <span style={{ background: '#ef4444', color: '#fff', padding: '1px 6px', borderRadius: 3, fontSize: '.55rem', fontWeight: 900, flexShrink: 0, animation: 'pulse 1s infinite' }}>
                               ON AIR
                             </span>
                           )}
                         </div>
-                        <div className="gfx-tpl-meta">
-                          <span className="gfx-tpl-type" style={{ background: meta.color + '20', color: meta.color }}>
-                            {meta.icon} {meta.label}
-                          </span>
-                          <span className="gfx-tpl-cat">{tpl.category}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                          <div className="gfx-tpl-meta" style={{ margin: 0 }}>
+                            <span className="gfx-tpl-type" style={{ background: meta.color + '20', color: meta.color }}>
+                              {meta.icon} {meta.label}
+                            </span>
+                            <span className="gfx-tpl-cat">{tpl.category}</span>
+                          </div>
+                          <div className="gfx-tpl-actions" style={{ display: 'flex', gap: 4 }}>
+                            {isLive ? (
+                              <button className="btn btn-xs btn-danger" style={{ fontWeight: 800, padding: '2px 8px' }} onClick={(e) => { e.stopPropagation(); hideGraphic(tpl.id); }} title="Take off air">
+                                ⏹ Off
+                              </button>
+                            ) : (
+                              <>
+                                <button className="btn btn-xs" style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 800, padding: '2px 7px', fontSize: '.6rem' }}
+                                  onClick={(e) => { e.stopPropagation(); showGraphic(tpl, {}, 'cut'); }} title="Instant Cut on Air">
+                                  ⚡ CUT
+                                </button>
+                                <button className="btn btn-xs" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff', border: 'none', fontWeight: 800, padding: '2px 7px', fontSize: '.6rem' }}
+                                  onClick={(e) => { e.stopPropagation(); showGraphic(tpl, {}, 'fade'); }} title="Auto Fade on Air">
+                                  🌊 FADE
+                                </button>
+                              </>
+                            )}
+                            <button className="btn btn-xs btn-outline" style={{ padding: '2px 6px' }} onClick={(e) => { e.stopPropagation(); setEditMode(true); setEditData({ ...tpl }); }} title="Edit">
+                              ✏️
+                            </button>
+                            <button className="btn btn-xs btn-outline" style={{ padding: '2px 6px', color: '#ef4444' }} onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.id); }} title="Delete">
+                              🗑️
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <div className="gfx-tpl-actions" style={{ display: 'flex', gap: 4 }}>
-                        {isLive ? (
-                          <button className="btn btn-xs btn-danger" style={{ fontWeight: 800 }} onClick={(e) => { e.stopPropagation(); hideGraphic(tpl.id); }} title="Take off air">
-                            ⏹ Off
-                          </button>
-                        ) : (
-                          <>
-                            <button className="btn btn-xs" style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 800, padding: '2px 6px', fontSize: '.6rem' }}
-                              onClick={(e) => { e.stopPropagation(); showGraphic(tpl, {}, 'cut'); }} title="Instant Cut on Air">
-                              ⚡ CUT
-                            </button>
-                            <button className="btn btn-xs" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff', border: 'none', fontWeight: 800, padding: '2px 6px', fontSize: '.6rem' }}
-                              onClick={(e) => { e.stopPropagation(); showGraphic(tpl, {}, 'fade'); }} title="Auto Fade on Air">
-                              🌊 FADE
-                            </button>
-                          </>
-                        )}
-                        <button className="btn btn-xs btn-outline" onClick={(e) => { e.stopPropagation(); setEditMode(true); setEditData({ ...tpl }); }} title="Edit">
-                          ✏️
-                        </button>
-                        <button className="btn btn-xs btn-outline" onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.id); }} title="Delete" style={{ color: '#ef4444' }}>
-                          🗑️
-                        </button>
                       </div>
                     </div>
                   );
@@ -706,7 +518,7 @@ export default function Graphics() {
                   </div>
 
                   {/* Live Rendered Canvas with Real-Time Quick Edit Text */}
-                  {renderPreview(selectedTpl, quickTexts)}
+                  {renderPreview(selectedTpl, quickTexts, 0.88)}
 
                   {/* Quick Edit Text Fields */}
                   <div className="gfx-quick-edit">
@@ -788,7 +600,7 @@ export default function Graphics() {
                     ON AIR ({g.type})
                   </div>
                   <div className="gfx-live-name">{g.name}</div>
-                  {renderPreview(g)}
+                  {renderPreview(g, {}, 0.7)}
                   <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                     <button className="btn btn-sm btn-danger" style={{ flex: 1, fontWeight: 800 }} onClick={() => hideGraphic(g.id, 'cut')}>
                       ⚡ CUT OFF
