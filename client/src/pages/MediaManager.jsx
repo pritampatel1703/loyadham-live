@@ -51,6 +51,9 @@ export default function MediaManager() {
   const audioRef = useRef(null);
   const videoRef = useRef(null);
 
+  const [transitionMode, setTransitionMode] = useState('fade'); // 'fade' | 'cut'
+  const [transitionDuration, setTransitionDuration] = useState(600); // ms
+
   // ─── Toast Helper ───
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
@@ -69,35 +72,45 @@ export default function MediaManager() {
     };
   }, []);
 
-  const sendToLivePgm = async (file) => {
+  const sendToLivePgm = async (file, customTransition, customDuration) => {
     try {
+      const trans = customTransition || transitionMode;
+      const dur = customDuration !== undefined ? customDuration : (trans === 'cut' ? 0 : transitionDuration);
+      const payload = { ...file, transition: trans, transitionDuration: dur };
+
       setPgmMediaId(file.id);
-      productionSocket.emit('media:play', file);
+      productionSocket.emit('media:play', payload);
       try {
         const bc = new BroadcastChannel('pixel_perfect_media');
-        bc.postMessage({ type: 'play', file, timestamp: Date.now() });
+        bc.postMessage({ type: 'play', file: payload, timestamp: Date.now() });
       } catch (_) {}
       await fetch('/api/media/playout/pgm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId: file.id }),
+        body: JSON.stringify({ fileId: file.id, transition: trans, transitionDuration: dur }),
       });
-      showToast(`Now playing "${file.name}" live on PGM output!`, 'success');
+      showToast(`▶ Now playing "${file.name}" live (${trans.toUpperCase()}${trans === 'fade' ? ` ${dur}ms` : ''})`, 'success');
     } catch (e) {
       console.error(e);
     }
   };
 
-  const stopLivePgm = async () => {
+  const stopLivePgm = async (customTransition, customDuration) => {
     try {
+      const trans = customTransition || transitionMode;
+      const dur = customDuration !== undefined ? customDuration : (trans === 'cut' ? 0 : transitionDuration);
       setPgmMediaId(null);
-      productionSocket.emit('media:stop');
+      productionSocket.emit('media:stop', { transition: trans, transitionDuration: dur });
       try {
         const bc = new BroadcastChannel('pixel_perfect_media');
-        bc.postMessage({ type: 'stop', timestamp: Date.now() });
+        bc.postMessage({ type: 'stop', transition: trans, transitionDuration: dur, timestamp: Date.now() });
       } catch (_) {}
-      await fetch('/api/media/playout/stop', { method: 'POST' });
-      showToast('Live media playout stopped', 'info');
+      await fetch('/api/media/playout/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transition: trans, transitionDuration: dur }),
+      });
+      showToast(`⏹ Live media playout stopped (${trans.toUpperCase()})`, 'info');
     } catch (e) {
       console.error(e);
     }
@@ -383,6 +396,142 @@ export default function MediaManager() {
         </div>
       )}
 
+      {/* ── Broadcast Playout Transition Bar ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        padding: '10px 16px',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-lg)',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+      }}>
+        {/* Transition Mode Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
+            TRANSITION:
+          </span>
+          <div style={{ display: 'flex', background: 'var(--bg-secondary)', padding: 3, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+            <button
+              className="btn btn-xs"
+              style={{
+                background: transitionMode === 'cut' ? '#ef4444' : 'transparent',
+                color: transitionMode === 'cut' ? '#fff' : 'var(--text-muted)',
+                fontWeight: 800,
+                padding: '5px 14px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={() => setTransitionMode('cut')}
+            >
+              ⚡ CUT (Instant)
+            </button>
+            <button
+              className="btn btn-xs"
+              style={{
+                background: transitionMode === 'fade' ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'transparent',
+                color: transitionMode === 'fade' ? '#fff' : 'var(--text-muted)',
+                fontWeight: 800,
+                padding: '5px 14px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={() => setTransitionMode('fade')}
+            >
+              🌊 AUTO FADE
+            </button>
+          </div>
+
+          {/* Duration Pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: '.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>Duration:</span>
+            {[
+              { label: '0.3s', ms: 300 },
+              { label: '0.6s', ms: 600 },
+              { label: '1.0s', ms: 1000 },
+              { label: '1.5s', ms: 1500 },
+            ].map(d => (
+              <button
+                key={d.ms}
+                className="btn btn-xs"
+                style={{
+                  background: transitionDuration === d.ms ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
+                  border: `1px solid ${transitionDuration === d.ms ? '#3b82f6' : 'var(--border)'}`,
+                  color: transitionDuration === d.ms ? '#60a5fa' : 'var(--text-muted)',
+                  fontWeight: 700,
+                  padding: '3px 8px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                }}
+                onClick={() => setTransitionDuration(d.ms)}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Live On-Air Playout Monitor Strip */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {pgmMediaId ? (
+            <>
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '5px 14px',
+                borderRadius: 20,
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                color: '#ef4444',
+                fontSize: '.75rem',
+                fontWeight: 800,
+                letterSpacing: 0.5,
+              }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+                ON AIR PGM: {files.find(f => f.id === pgmMediaId)?.name || 'Media Playout'}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  className="btn btn-xs btn-danger"
+                  style={{ fontWeight: 800, padding: '5px 12px' }}
+                  onClick={() => stopLivePgm('cut', 0)}
+                  title="Instant Cut Playout Off Air"
+                >
+                  ⚡ CUT OFF
+                </button>
+                <button
+                  className="btn btn-xs"
+                  style={{
+                    background: 'linear-gradient(135deg, #1e293b, #334155)',
+                    border: '1px solid #64748b',
+                    color: '#93c5fd',
+                    fontWeight: 800,
+                    padding: '5px 12px',
+                  }}
+                  onClick={() => stopLivePgm('fade', transitionDuration)}
+                  title={`Smooth Fade Playout Off Air (${transitionDuration}ms)`}
+                >
+                  🌊 FADE OUT
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: '.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#64748b' }} />
+              PGM Playout: Standby
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="media-layout">
         {/* ─── Folder Sidebar ─── */}
         <div className="media-folders">
@@ -462,57 +611,123 @@ export default function MediaManager() {
 
           {viewMode === 'grid' ? (
             <div className="media-grid">
-              {files.map(f => (
-                <div key={f.id} className={`media-card ${selected === f.id ? 'selected' : ''}`}
-                  onClick={() => setSelected(f.id)}
-                  onDoubleClick={() => addToPlaylist(f)}>
-                  <div className="media-card-thumb" style={{ background: TYPE_COLORS[f.type] + '10' }}>
-                    {f.hasFile && f.type === 'image' ? (
-                      <img src={f.url} alt={f.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} loading="lazy" />
-                    ) : (
-                      <span style={{ fontSize: '2rem' }}>{TYPE_ICONS[f.type]}</span>
-                    )}
-                    {f.duration > 0 && <span className="media-card-duration">{formatDuration(f.duration)}</span>}
-                    {f.isDemo && <span className="media-card-demo">DEMO</span>}
+              {files.map(f => {
+                const isLive = pgmMediaId === f.id;
+                return (
+                  <div key={f.id} className={`media-card ${selected === f.id ? 'selected' : ''}`}
+                    style={isLive ? { borderColor: '#ef4444', boxShadow: '0 0 12px rgba(239,68,68,0.3)' } : {}}
+                    onClick={() => setSelected(f.id)}
+                    onDoubleClick={() => addToPlaylist(f)}>
+                    <div className="media-card-thumb" style={{ background: TYPE_COLORS[f.type] + '10' }}>
+                      {f.hasFile && f.type === 'image' ? (
+                        <img src={f.url} alt={f.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} loading="lazy" />
+                      ) : (
+                        <span style={{ fontSize: '2rem' }}>{TYPE_ICONS[f.type]}</span>
+                      )}
+                      {f.duration > 0 && <span className="media-card-duration">{formatDuration(f.duration)}</span>}
+                      {f.isDemo && <span className="media-card-demo">DEMO</span>}
+                      {isLive && (
+                        <span style={{
+                          position: 'absolute',
+                          top: 4,
+                          right: 4,
+                          background: '#ef4444',
+                          color: '#fff',
+                          padding: '2px 6px',
+                          borderRadius: 3,
+                          fontSize: '.55rem',
+                          fontWeight: 900,
+                          letterSpacing: 0.5,
+                          animation: 'pulse 1s infinite'
+                        }}>
+                          LIVE PGM
+                        </span>
+                      )}
+                    </div>
+                    <div className="media-card-info">
+                      <div className="media-card-name">{f.name}</div>
+                      <div className="media-card-meta">{formatBytes(f.size)} • {f.folder}</div>
+                      {/* Card Playout Buttons */}
+                      <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                        {isLive ? (
+                          <button
+                            className="btn btn-xs btn-danger"
+                            style={{ flex: 1, padding: '3px 0', fontSize: '.65rem', fontWeight: 800 }}
+                            onClick={(e) => { e.stopPropagation(); stopLivePgm(); }}
+                          >
+                            ⏹ Off Air
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              className="btn btn-xs"
+                              style={{ flex: 1, padding: '3px 0', fontSize: '.62rem', fontWeight: 800, background: '#ef4444', color: '#fff', border: 'none' }}
+                              onClick={(e) => { e.stopPropagation(); sendToLivePgm(f, 'cut', 0); }}
+                              title="Instant Cut to PGM"
+                            >
+                              ⚡ CUT
+                            </button>
+                            <button
+                              className="btn btn-xs"
+                              style={{ flex: 1, padding: '3px 0', fontSize: '.62rem', fontWeight: 800, background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff', border: 'none' }}
+                              onClick={(e) => { e.stopPropagation(); sendToLivePgm(f, 'fade', transitionDuration); }}
+                              title={`Fade to PGM (${transitionDuration}ms)`}
+                            >
+                              🌊 FADE
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="media-card-info">
-                    <div className="media-card-name">{f.name}</div>
-                    <div className="media-card-meta">{formatBytes(f.size)} • {f.folder}</div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="media-list">
               <div className="media-list-header">
-                <span style={{ flex: 2 }}>Name</span><span style={{ flex: 1 }}>Type</span><span style={{ flex: 1 }}>Size</span><span style={{ flex: 1 }}>Duration</span><span style={{ flex: 1 }}>Folder</span><span style={{ width: 80 }}>Actions</span>
+                <span style={{ flex: 2 }}>Name</span><span style={{ flex: 1 }}>Type</span><span style={{ flex: 1 }}>Size</span><span style={{ flex: 1 }}>Duration</span><span style={{ flex: 1 }}>Folder</span><span style={{ width: 140 }}>Actions</span>
               </div>
-              {files.map(f => (
-                <div key={f.id} className={`media-list-row ${selected === f.id ? 'selected' : ''}`}
-                  onClick={() => setSelected(f.id)} onDoubleClick={() => addToPlaylist(f)}>
-                  <span style={{ flex: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span>{TYPE_ICONS[f.type]}</span>
-                    {editingFile === f.id ? (
-                      <input className="form-input" style={{ flex: 1, fontSize: '.75rem', padding: '2px 6px' }}
-                        defaultValue={f.name} autoFocus
-                        onBlur={e => renameFile(f.id, e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') renameFile(f.id, e.target.value); if (e.key === 'Escape') setEditingFile(null); }} />
-                    ) : (
-                      <span style={{ cursor: 'pointer' }} onDoubleClick={(e) => { e.stopPropagation(); setEditingFile(f.id); }}>{f.name}</span>
-                    )}
-                    {f.isDemo && <span className="media-demo-badge">DEMO</span>}
-                  </span>
-                  <span style={{ flex: 1 }}><span className="media-type-badge" style={{ background: TYPE_COLORS[f.type] + '20', color: TYPE_COLORS[f.type] }}>{f.type}</span></span>
-                  <span style={{ flex: 1 }}>{formatBytes(f.size)}</span>
-                  <span style={{ flex: 1 }}>{formatDuration(f.duration)}</span>
-                  <span style={{ flex: 1, fontSize: '.7rem', color: 'var(--text-muted)' }}>{f.folder}</span>
-                  <span style={{ width: 80, display: 'flex', gap: 2 }}>
-                    <button className="btn btn-xs btn-ghost" title="Add to playlist" onClick={(e) => { e.stopPropagation(); addToPlaylist(f); }}>➕</button>
-                    <button className="btn btn-xs btn-ghost" title="Move" onClick={(e) => { e.stopPropagation(); setMoveTarget(f.id === moveTarget ? null : f.id); }}>📁</button>
-                    <button className="btn btn-xs btn-ghost" style={{ color: '#ef4444' }} title="Delete" onClick={(e) => { e.stopPropagation(); deleteFile(f.id); }}>🗑️</button>
-                  </span>
-                </div>
-              ))}
+              {files.map(f => {
+                const isLive = pgmMediaId === f.id;
+                return (
+                  <div key={f.id} className={`media-list-row ${selected === f.id ? 'selected' : ''}`}
+                    style={isLive ? { background: 'rgba(239,68,68,0.08)', borderLeft: '3px solid #ef4444' } : {}}
+                    onClick={() => setSelected(f.id)} onDoubleClick={() => addToPlaylist(f)}>
+                    <span style={{ flex: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>{TYPE_ICONS[f.type]}</span>
+                      {editingFile === f.id ? (
+                        <input className="form-input" style={{ flex: 1, fontSize: '.75rem', padding: '2px 6px' }}
+                          defaultValue={f.name} autoFocus
+                          onBlur={e => renameFile(f.id, e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') renameFile(f.id, e.target.value); if (e.key === 'Escape') setEditingFile(null); }} />
+                      ) : (
+                        <span style={{ cursor: 'pointer' }} onDoubleClick={(e) => { e.stopPropagation(); setEditingFile(f.id); }}>{f.name}</span>
+                      )}
+                      {f.isDemo && <span className="media-demo-badge">DEMO</span>}
+                      {isLive && <span style={{ background: '#ef4444', color: '#fff', padding: '1px 5px', borderRadius: 3, fontSize: '.55rem', fontWeight: 900 }}>LIVE</span>}
+                    </span>
+                    <span style={{ flex: 1 }}><span className="media-type-badge" style={{ background: TYPE_COLORS[f.type] + '20', color: TYPE_COLORS[f.type] }}>{f.type}</span></span>
+                    <span style={{ flex: 1 }}>{formatBytes(f.size)}</span>
+                    <span style={{ flex: 1 }}>{formatDuration(f.duration)}</span>
+                    <span style={{ flex: 1, fontSize: '.7rem', color: 'var(--text-muted)' }}>{f.folder}</span>
+                    <span style={{ width: 140, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {isLive ? (
+                        <button className="btn btn-xs btn-danger" style={{ fontWeight: 800 }} onClick={(e) => { e.stopPropagation(); stopLivePgm(); }}>⏹ Stop</button>
+                      ) : (
+                        <>
+                          <button className="btn btn-xs" style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 800, padding: '2px 6px', fontSize: '.62rem' }}
+                            onClick={(e) => { e.stopPropagation(); sendToLivePgm(f, 'cut', 0); }} title="Cut to PGM">⚡ CUT</button>
+                          <button className="btn btn-xs" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff', border: 'none', fontWeight: 800, padding: '2px 6px', fontSize: '.62rem' }}
+                            onClick={(e) => { e.stopPropagation(); sendToLivePgm(f, 'fade', transitionDuration); }} title={`Fade to PGM (${transitionDuration}ms)`}>🌊 FADE</button>
+                        </>
+                      )}
+                      <button className="btn btn-xs btn-ghost" title="Add to playlist" onClick={(e) => { e.stopPropagation(); addToPlaylist(f); }}>➕</button>
+                      <button className="btn btn-xs btn-ghost" style={{ color: '#ef4444' }} title="Delete" onClick={(e) => { e.stopPropagation(); deleteFile(f.id); }}>🗑️</button>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -581,24 +796,44 @@ export default function MediaManager() {
                   </div>
                 </div>
 
-                {/* Live PGM Playout Button */}
-                <div style={{ marginTop: 8 }}>
+                {/* Live PGM Playout Controls */}
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {pgmMediaId === sel.id ? (
-                    <button
-                      className="btn btn-sm btn-danger"
-                      style={{ width: '100%', fontWeight: 700, animation: 'pulse 1.5s infinite' }}
-                      onClick={stopLivePgm}
-                    >
-                      ⏹ STOP LIVE PGM PLAYOUT
-                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        style={{ flex: 1, fontWeight: 800 }}
+                        onClick={() => stopLivePgm('cut', 0)}
+                      >
+                        ⚡ CUT OFF
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        style={{ flex: 1, background: 'linear-gradient(135deg, #1e293b, #334155)', border: '1px solid #64748b', color: '#93c5fd', fontWeight: 800 }}
+                        onClick={() => stopLivePgm('fade', transitionDuration)}
+                      >
+                        🌊 FADE OUT
+                      </button>
+                    </div>
                   ) : (
-                    <button
-                      className="btn btn-sm"
-                      style={{ width: '100%', background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', color: '#fff', fontWeight: 700 }}
-                      onClick={() => sendToLivePgm(sel)}
-                    >
-                      📡 SEND TO LIVE PGM OUTPUT
-                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        className="btn btn-sm"
+                        style={{ flex: 1, background: '#ef4444', color: '#fff', fontWeight: 800, border: 'none' }}
+                        onClick={() => sendToLivePgm(sel, 'cut', 0)}
+                        title="Instant cut to PGM output"
+                      >
+                        ⚡ CUT TO PGM
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        style={{ flex: 1, background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)', color: '#fff', fontWeight: 800, border: 'none' }}
+                        onClick={() => sendToLivePgm(sel, 'fade', transitionDuration)}
+                        title={`Smooth fade to PGM output (${transitionDuration}ms)`}
+                      >
+                        🌊 AUTO FADE
+                      </button>
+                    </div>
                   )}
                 </div>
 

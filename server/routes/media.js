@@ -518,25 +518,26 @@ router.get('/playout/current', (_req, res) => {
 });
 
 router.post('/playout/pgm', (req, res) => {
-  const { fileId } = req.body;
+  const { fileId, transition = 'fade', transitionDuration = 600 } = req.body;
   const file = mediaFiles.find(f => f.id === fileId);
   if (!file) return res.status(404).json({ error: 'Media file not found' });
 
-  currentLiveMedia = file;
+  currentLiveMedia = { ...file, transition, transitionDuration };
   const io = req.app.get('io');
   if (io) {
-    io.emit('media:play', file);
-    io.of('/production').emit('media:play', file);
+    io.emit('media:play', currentLiveMedia);
+    io.of('/production').emit('media:play', currentLiveMedia);
   }
-  res.json({ success: true, file });
+  res.json({ success: true, file: currentLiveMedia });
 });
 
 router.post('/playout/stop', (req, res) => {
+  const { transition = 'fade', transitionDuration = 600 } = req.body;
   currentLiveMedia = null;
   const io = req.app.get('io');
   if (io) {
-    io.emit('media:stop');
-    io.of('/production').emit('media:stop');
+    io.emit('media:stop', { transition, transitionDuration });
+    io.of('/production').emit('media:stop', { transition, transitionDuration });
   }
   res.json({ success: true });
 });

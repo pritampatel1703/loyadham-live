@@ -33,9 +33,12 @@ export default function ProgramOutput() {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [fadeToBlack, setFadeToBlack] = useState(false);
 
-  // Live Media Playout
+  // Live Media Playout with CUT / FADE Transitions
   const [liveMedia, setLiveMedia] = useState(null);
   const [mediaError, setMediaError] = useState(false);
+  const [mediaOpacity, setMediaOpacity] = useState(1);
+  const [mediaTransitionDuration, setMediaTransitionDuration] = useState(600);
+  const mediaFadeTimeout = useRef(null);
 
   useEffect(() => {
     setMediaError(false);
@@ -478,11 +481,56 @@ export default function ProgramOutput() {
     productionSocket.on('graphic:logo', onGraphicLogo);
     productionSocket.on('overlay-update', setLegacyOverlay);
 
-    // Media Playout Socket Listeners
-    const onMediaPlay = (file) => setLiveMedia(file);
-    const onMediaStop = () => setLiveMedia(null);
-    productionSocket.on('media:play', onMediaPlay);
-    productionSocket.on('media:stop', onMediaStop);
+    // Media Playout Handlers with CUT and FADE transitions
+    const handleMediaPlay = (file) => {
+      if (!file) return;
+      if (mediaFadeTimeout.current) {
+        clearTimeout(mediaFadeTimeout.current);
+        mediaFadeTimeout.current = null;
+      }
+      const isFade = file.transition === 'fade';
+      const dur = typeof file.transitionDuration === 'number' ? file.transitionDuration : 600;
+      setMediaTransitionDuration(isFade ? dur : 0);
+
+      if (isFade) {
+        setMediaOpacity(0);
+        setLiveMedia(file);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setMediaOpacity(1);
+          });
+        });
+      } else {
+        setMediaOpacity(1);
+        setLiveMedia(file);
+      }
+    };
+
+    const handleMediaStop = (data) => {
+      const isFade = data?.transition === 'fade';
+      const dur = typeof data?.transitionDuration === 'number' ? data.transitionDuration : 600;
+      if (mediaFadeTimeout.current) {
+        clearTimeout(mediaFadeTimeout.current);
+        mediaFadeTimeout.current = null;
+      }
+
+      if (isFade) {
+        setMediaTransitionDuration(dur);
+        setMediaOpacity(0);
+        mediaFadeTimeout.current = setTimeout(() => {
+          setLiveMedia(null);
+          setMediaOpacity(1);
+        }, dur);
+      } else {
+        setMediaTransitionDuration(0);
+        setMediaOpacity(0);
+        setLiveMedia(null);
+        setMediaOpacity(1);
+      }
+    };
+
+    productionSocket.on('media:play', handleMediaPlay);
+    productionSocket.on('media:stop', handleMediaStop);
 
     // BroadcastChannel cross-window sync
     let pgmBc, gfxBc, mediaBc;
@@ -506,8 +554,8 @@ export default function ProgramOutput() {
 
       mediaBc = new BroadcastChannel('pixel_perfect_media');
       mediaBc.onmessage = (e) => {
-        if (e.data?.type === 'play' && e.data.file) setLiveMedia(e.data.file);
-        if (e.data?.type === 'stop') setLiveMedia(null);
+        if (e.data?.type === 'play' && e.data.file) handleMediaPlay(e.data.file);
+        if (e.data?.type === 'stop') handleMediaStop(e.data);
       };
     } catch (_) {}
 
@@ -536,10 +584,14 @@ export default function ProgramOutput() {
     }).catch(() => {});
 
     fetch('/api/media/playout/current').then(r => r.json()).then(d => {
-      if (d?.media) setLiveMedia(d.media);
+      if (d?.media) {
+        setLiveMedia(d.media);
+        setMediaOpacity(1);
+      }
     }).catch(() => {});
 
     return () => {
+      if (mediaFadeTimeout.current) clearTimeout(mediaFadeTimeout.current);
       clearInterval(pollId);
       if (pgmBc) pgmBc.close();
       if (gfxBc) gfxBc.close();
@@ -697,7 +749,17 @@ export default function ProgramOutput() {
 
       {/* ── 4. MEDIA PLAYOUT (Videos / Images / Audio) ── */}
       {liveMedia && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 35, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 35,
+          background: '#000',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: mediaOpacity,
+          transition: mediaTransitionDuration > 0 ? `opacity ${mediaTransitionDuration}ms cubic-bezier(0.4, 0, 0.2, 1)` : 'none',
+        }}>
           {liveMedia.type === 'video' ? (
             <>
               <video
@@ -822,6 +884,9 @@ export default function ProgramOutput() {
           if (gfx.type === 'lower-third') {
             const title = getText(l.title, 'Speaker Name');
             const subtitle = getText(l.subtitle, 'Title / Designation');
+            const badge = getText(l.badge);
+            const accentColor = l.accentBar?.color || '#dc2626';
+
             return (
               <div key={gfx.id} style={{
                 position: 'absolute',
@@ -830,16 +895,35 @@ export default function ProgramOutput() {
                 display: 'flex',
                 flexDirection: 'column',
                 animation: 'slideInLeft 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                filter: 'drop-shadow(0 10px 25px rgba(0,0,0,0.7))',
               }}>
+                {badge && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    alignSelf: 'flex-start',
+                    background: 'rgba(15, 23, 42, 0.96)',
+                    borderLeft: `4px solid ${accentColor}`,
+                    padding: '4px 14px',
+                    color: '#f8fafc',
+                    fontSize: '0.85rem',
+                    fontWeight: 800,
+                    letterSpacing: 1.5,
+                    textTransform: 'uppercase',
+                    marginBottom: 2,
+                  }}>
+                    {badge}
+                  </div>
+                )}
                 <div style={{
-                  background: l.accentBar?.color || '#dc2626',
+                  background: accentColor,
                   padding: '8px 28px',
                   color: '#ffffff',
                   fontSize: '2rem',
                   fontWeight: 900,
                   textTransform: 'uppercase',
                   letterSpacing: 2,
-                  boxShadow: '0 10px 25px rgba(0,0,0,0.6)',
                 }}>
                   {title}
                 </div>
@@ -851,7 +935,6 @@ export default function ProgramOutput() {
                     fontSize: '1.2rem',
                     fontWeight: 600,
                     display: 'inline-block',
-                    boxShadow: '0 5px 15px rgba(0,0,0,0.5)',
                   }}>
                     {subtitle}
                   </div>
@@ -887,25 +970,43 @@ export default function ProgramOutput() {
           }
 
           if (gfx.type === 'score') {
+            const clock = getText(l.clock);
             return (
               <div key={gfx.id} style={{
                 position: 'absolute',
                 top: 36,
                 left: 36,
-                background: 'rgba(15, 23, 42, 0.95)',
-                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'rgba(15, 23, 42, 0.96)',
+                border: '1px solid rgba(255,255,255,0.18)',
                 borderRadius: 8,
                 padding: '10px 20px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 16,
                 boxShadow: '0 8px 25px rgba(0,0,0,0.6)',
+                animation: 'slideInLeft 0.3s ease-out',
               }}>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 800 }}>{getText(l.team1, 'TEAM A')}</div>
                   <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff' }}>{getText(l.score1, '0')}</div>
                 </div>
-                <div style={{ fontSize: '1.2rem', color: '#64748b' }}>VS</div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div style={{ fontSize: '1rem', color: '#64748b', fontWeight: 800 }}>VS</div>
+                  {clock && (
+                    <div style={{
+                      background: 'rgba(239, 68, 68, 0.25)',
+                      border: '1px solid rgba(239, 68, 68, 0.6)',
+                      color: '#ef4444',
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      fontSize: '0.65rem',
+                      fontWeight: 900,
+                      fontFamily: 'monospace',
+                    }}>
+                      {clock}
+                    </div>
+                  )}
+                </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 800 }}>{getText(l.team2, 'TEAM B')}</div>
                   <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff' }}>{getText(l.score2, '0')}</div>
@@ -915,22 +1016,36 @@ export default function ProgramOutput() {
           }
 
           if (gfx.type === 'ticker') {
+            const label = getText(l.label, 'LIVE UPDATES');
             return (
               <div key={gfx.id} style={{
                 position: 'absolute',
                 bottom: 0,
                 left: 0,
                 right: 0,
-                background: 'rgba(15, 23, 42, 0.95)',
+                background: 'rgba(15, 23, 42, 0.96)',
                 color: '#fff',
-                padding: '8px 24px',
-                fontSize: '1.1rem',
                 borderTop: '2px solid #38bdf8',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                boxShadow: '0 -5px 25px rgba(0,0,0,0.6)',
               }}>
-                <div style={{ display: 'inline-block', animation: 'tickerMarquee 20s linear infinite' }}>
-                  {getText(l.text, 'Welcome to the live broadcast! • Loyadham Live Production Engine')}
+                <div style={{
+                  background: '#38bdf8',
+                  color: '#0f172a',
+                  fontWeight: 900,
+                  fontSize: '0.85rem',
+                  letterSpacing: 1.5,
+                  padding: '8px 20px',
+                  whiteSpace: 'nowrap',
+                  zIndex: 2,
+                }}>
+                  {label}
+                </div>
+                <div style={{ flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', padding: '8px 0' }}>
+                  <div style={{ display: 'inline-block', animation: 'tickerMarquee 25s linear infinite', fontSize: '1.15rem', fontWeight: 600 }}>
+                    {getText(l.text, 'Welcome to the live broadcast!')}
+                  </div>
                 </div>
               </div>
             );
@@ -943,20 +1058,22 @@ export default function ProgramOutput() {
                 bottom: '12%',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                maxWidth: 900,
-                background: 'rgba(15, 23, 42, 0.92)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: 12,
-                padding: '24px 36px',
+                maxWidth: 950,
+                width: '80%',
+                background: 'rgba(15, 23, 42, 0.94)',
+                border: '1.5px solid rgba(245, 158, 11, 0.6)',
+                borderRadius: 16,
+                padding: '28px 42px',
                 textAlign: 'center',
-                boxShadow: '0 15px 35px rgba(0,0,0,0.7)',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+                animation: 'fadeIn 0.5s ease-out',
               }}>
-                <div style={{ fontSize: '2rem', marginBottom: 8 }}>🙏</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f8fafc', fontStyle: 'italic', lineHeight: 1.4 }}>
-                  "{getText(l.verse, 'Trust in the Lord with all your heart and lean not on your own understanding.')}"
+                <div style={{ fontSize: '2.4rem', marginBottom: 10 }}>🕉️ 🙏 🕉️</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 600, color: '#fef3c7', fontStyle: 'italic', lineHeight: 1.5 }}>
+                  "{getText(l.verse, 'Whenever you find yourself in darkness, hold steadfast to the divine virtues.')}"
                 </div>
                 {getText(l.reference) && (
-                  <div style={{ marginTop: 10, fontSize: '1.1rem', color: '#94a3b8', fontWeight: 700 }}>
+                  <div style={{ marginTop: 14, fontSize: '1.15rem', color: '#fbbf24', fontWeight: 800, letterSpacing: 1 }}>
                     {getText(l.reference)}
                   </div>
                 )}
@@ -969,18 +1086,34 @@ export default function ProgramOutput() {
               <div key={gfx.id} style={{
                 position: 'absolute',
                 inset: 0,
-                background: 'rgba(15, 23, 42, 0.88)',
+                background: 'radial-gradient(ellipse at center, rgba(30, 27, 75, 0.95) 0%, rgba(2, 6, 23, 0.98) 100%)',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 textAlign: 'center',
+                padding: 40,
+                animation: 'fadeIn 0.6s ease-out',
               }}>
-                <div style={{ fontSize: '3.5rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>
+                <div style={{
+                  fontSize: '4rem',
+                  fontWeight: 900,
+                  color: '#ffffff',
+                  letterSpacing: 2,
+                  textTransform: 'uppercase',
+                  textShadow: '0 10px 30px rgba(0,0,0,0.8)',
+                }}>
                   {getText(l.title, 'Special Broadcast Event')}
                 </div>
                 {getText(l.subtitle) && (
-                  <div style={{ fontSize: '1.8rem', color: '#94a3b8', marginTop: 12 }}>
+                  <div style={{
+                    fontSize: '1.8rem',
+                    color: '#93c5fd',
+                    marginTop: 18,
+                    fontWeight: 600,
+                    letterSpacing: 1,
+                    maxWidth: 1000,
+                  }}>
                     {getText(l.subtitle)}
                   </div>
                 )}
@@ -989,27 +1122,29 @@ export default function ProgramOutput() {
           }
 
           if (gfx.type === 'countdown') {
+            const is10s = gfx.id?.includes('10s');
             return (
               <div key={gfx.id} style={{
                 position: 'absolute',
                 top: '50%',
                 left: '50%',
                 transform: 'translate(-50%, -50%)',
-                background: 'rgba(15, 23, 42, 0.92)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: 20,
-                padding: '30px 60px',
+                background: 'rgba(15, 23, 42, 0.95)',
+                border: '2px solid rgba(56, 189, 248, 0.5)',
+                borderRadius: 24,
+                padding: '36px 72px',
                 textAlign: 'center',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+                boxShadow: '0 25px 60px rgba(0,0,0,0.9)',
+                animation: 'fadeIn 0.4s ease-out',
               }}>
-                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#94a3b8', letterSpacing: 4, textTransform: 'uppercase' }}>
-                  {getText(l.label, 'STARTING IN')}
+                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#94a3b8', letterSpacing: 4, textTransform: 'uppercase' }}>
+                  {getText(l.label, is10s ? 'GOING LIVE IN' : 'STREAM STARTING IN')}
                 </div>
-                <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace', margin: '8px 0' }}>
-                  00:30
+                <div style={{ fontSize: '5.5rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace', margin: '10px 0', textShadow: '0 0 30px rgba(56,189,248,0.5)' }}>
+                  {is10s ? '00:10' : '00:30'}
                 </div>
-                <div style={{ fontSize: '1.2rem', color: '#cbd5e1', fontWeight: 600 }}>
-                  {getText(l.subtitle, 'Live Broadcast Event')}
+                <div style={{ fontSize: '1.3rem', color: '#cbd5e1', fontWeight: 600 }}>
+                  {getText(l.subtitle, 'Loyadham Live Broadcast')}
                 </div>
               </div>
             );
