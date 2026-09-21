@@ -121,3 +121,18 @@ export const graphicsApi = {
   hideAll: () => api('/api/graphics/hide-all', { method: 'POST' }),
 };
 
+export const ptzApi = {
+  cameras: () => api('/api/ptz/cameras'),
+  addCamera: (d) => api('/api/ptz/cameras', { method: 'POST', body: JSON.stringify(d) }),
+  updateCamera: (id, d) => api(`/api/ptz/cameras/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteCamera: (id) => api(`/api/ptz/cameras/${id}`, { method: 'DELETE' }),
+  testCamera: (id) => api(`/api/ptz/cameras/${id}/test`, { method: 'POST' }),
+  move: (id, pan, tilt, speed) => api(`/api/ptz/cameras/${id}/move`, { method: 'POST', body: JSON.stringify({ pan, tilt, speed }) }),
+  zoom: (id, zoom) => api(`/api/ptz/cameras/${id}/zoom`, { method: 'POST', body: JSON.stringify({ zoom }) }),
+  focus: (id, focus, autoFocus) => api(`/api/ptz/cameras/${id}/focus`, { method: 'POST', body: JSON.stringify({ focus, autoFocus }) }),
+  home: (id) => api(`/api/ptz/cameras/${id}/home`, { method: 'POST' }),
+  presets: (id) => api(`/api/ptz/cameras/${id}/presets`),
+  savePreset: (id, d) => api(`/api/ptz/cameras/${id}/presets`, { method: 'POST', body: JSON.stringify(d) }),
+  recallPreset: (camId, presetId) => api(`/api/ptz/cameras/${camId}/presets/${presetId}/recall`, { method: 'POST' }),
+  deletePreset: (camId, presetId) => api(`/api/ptz/cameras/${camId}/presets/${presetId}`, { method: 'DELETE' }),
+};

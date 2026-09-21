@@ -56,6 +56,7 @@ const { initDatabase } = require('./db/database');
   app.use('/api/system', require('./routes/system'));
   app.use('/api/graphics', require('./routes/graphics'));
   app.use('/api/media', require('./routes/media'));
+  app.use('/api/ptz', require('./routes/ptz'));
 
   app.set('io', io);
 

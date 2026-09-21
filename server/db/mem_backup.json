@@ -15,7 +15,7 @@
       "stream_bitrate": 0,
       "network_type": "",
       "ip_address": "",
-      "tally_state": "program",
+      "tally_state": "preview",
       "tags": []
     },
     {
@@ -24,8 +24,8 @@
       "label": "",
       "group_name": "Default",
       "pairing_token": "1087FB05E618",
-      "is_online": 1,
-      "battery_percent": 75,
+      "is_online": 0,
+      "battery_percent": 74,
       "signal_quality": 17,
       "temperature": -1,
       "stream_resolution": "1920x1080",
