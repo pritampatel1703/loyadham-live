@@ -1402,30 +1402,33 @@ tr:hover td{background:var(--bg-card-hover)}
 /* D-Pad Console */
 .ptz-dpad {
   display: grid;
-  grid-template-areas:
-    "_ up _"
-    "left center right"
-    "_ down _";
-  gap: 5px;
-  width: 130px;
-  height: 130px;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
+  gap: 6px;
+  width: 132px;
+  height: 132px;
+  justify-content: center;
+  align-content: center;
+  margin: 0 auto;
 }
 
 .ptz-dpad-btn {
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgba(255,255,255,.12);
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid rgba(255,255,255,.14);
   background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
   color: var(--text-primary);
-  border-radius: 8px;
+  border-radius: 9px;
   cursor: pointer;
-  font-size: .85rem;
+  font-size: .95rem;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all .12s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 2px 6px rgba(0,0,0,.4);
   user-select: none;
+  padding: 0;
 }
 
 .ptz-dpad-btn:hover {
@@ -1433,7 +1436,7 @@ tr:hover td{background:var(--bg-card-hover)}
   color: #fff;
   border-color: var(--accent);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99,102,241,.4);
+  box-shadow: 0 4px 14px rgba(0, 212, 255, 0.45);
 }
 
 .ptz-dpad-btn:active {
@@ -1441,16 +1444,33 @@ tr:hover td{background:var(--bg-card-hover)}
   box-shadow: none;
 }
 
-.ptz-dpad-up { grid-area: up; justify-self: center; }
-.ptz-dpad-left { grid-area: left; justify-self: end; }
-.ptz-dpad-center {
-  grid-area: center;
-  justify-self: center;
-  background: radial-gradient(circle, #334155 0%, #1e293b 100%);
-  border-color: rgba(255,255,255,.2);
+.ptz-dpad-up {
+  grid-column: 2;
+  grid-row: 1;
 }
-.ptz-dpad-right { grid-area: right; justify-self: start; }
-.ptz-dpad-down { grid-area: down; justify-self: center; }
+
+.ptz-dpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.ptz-dpad-center {
+  grid-column: 2;
+  grid-row: 2;
+  background: radial-gradient(circle, #334155 0%, #1e293b 100%);
+  border-color: rgba(255,255,255,.25);
+  font-size: 1.1rem;
+}
+
+.ptz-dpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.ptz-dpad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
 
 /* Sliders & Optics Module */
 .ptz-sliders {
