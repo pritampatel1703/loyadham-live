@@ -1491,6 +1491,172 @@ tr:hover td{background:var(--bg-card-hover)}
   color: #fff;
 }
 
+/* ═══ TACTILE CAPSULE SLIDER (Broadcast Studio Console) ═══ */
+.ptz-tactile-slider-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+
+.ptz-tactile-slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ptz-tactile-slider-label {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ptz-tactile-slider-value {
+  font-family: var(--mono);
+  font-size: .74rem;
+  font-weight: 800;
+  color: #00e5ff;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+}
+
+.ptz-tactile-capsule-track {
+  position: relative;
+  height: 40px;
+  background: linear-gradient(180deg, #0b111e 0%, #060912 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  box-shadow: 
+    inset 0 3px 8px rgba(0, 0, 0, 0.85),
+    0 4px 14px rgba(0, 0, 0, 0.6),
+    0 0 16px rgba(79, 70, 229, 0.22);
+  display: flex;
+  align-items: center;
+  user-select: none;
+  transition: border-color .2s, box-shadow .2s;
+  overflow: visible;
+}
+
+.ptz-tactile-capsule-track:hover,
+.ptz-tactile-capsule-track.active {
+  border-color: rgba(0, 229, 255, 0.55);
+  box-shadow: 
+    inset 0 3px 8px rgba(0, 0, 0, 0.85),
+    0 4px 16px rgba(0, 0, 0, 0.7),
+    0 0 22px rgba(0, 229, 255, 0.35);
+}
+
+.ptz-tactile-capsule-track.disabled {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+  pointer-events: none;
+}
+
+.ptz-capsule-groove {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.ptz-capsule-detent {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.ptz-capsule-thumb-assembly {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 2;
+  transition: transform .08s ease-out;
+}
+
+.ptz-capsule-arrow {
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: color .15s, transform .12s;
+}
+
+.ptz-capsule-arrow:hover {
+  color: #00e5ff;
+  transform: scale(1.2);
+}
+
+.ptz-capsule-arrow:active {
+  transform: scale(0.9);
+}
+
+.ptz-capsule-thumb {
+  width: 32px;
+  height: 30px;
+  background: linear-gradient(180deg, #00f0ff 0%, #00b4d8 100%);
+  border-radius: 9px;
+  box-shadow: 
+    0 2px 10px rgba(0, 229, 255, 0.5),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.8),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: grab;
+  transition: transform .1s, box-shadow .15s;
+}
+
+.ptz-capsule-thumb:hover {
+  transform: scale(1.06);
+  box-shadow: 
+    0 4px 16px rgba(0, 229, 255, 0.75),
+    inset 0 1px 2px #fff;
+}
+
+.ptz-capsule-thumb.dragging,
+.ptz-capsule-thumb:active {
+  transform: scale(0.95);
+  cursor: grabbing;
+  box-shadow: 
+    0 2px 8px rgba(0, 229, 255, 0.9),
+    inset 0 1px 1px #fff;
+}
+
+.ptz-capsule-range-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: grab;
+  z-index: 5;
+  margin: 0;
+  padding: 0;
+}
+
+.ptz-capsule-range-native:active {
+  cursor: grabbing;
+}
+
 /* ── RIGHT: Preset Matrix ── */
 .ptz-presets {
   background: linear-gradient(180deg, rgba(15,23,42,.8) 0%, rgba(10,15,29,.9) 100%);

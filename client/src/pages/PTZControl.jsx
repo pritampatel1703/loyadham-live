@@ -16,6 +16,128 @@ const SPEED_PRESETS = [
   { label: '10x Max', value: 10 },
 ];
 
+/* ═══════════════════════════════════════════════════════════
+   TACTILE CAPSULE SLIDER COMPONENT
+   Broadcast Control Desk Custom Slider with Inward Guides
+   ═══════════════════════════════════════════════════════════ */
+function TactileCapsuleSlider({
+  label,
+  icon,
+  value = 50,
+  min = 0,
+  max = 100,
+  step = 1,
+  onChange,
+  disabled = false,
+  displayValue,
+  unit = '%',
+  onNudge,
+  onReset,
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const clampedVal = Math.max(min, Math.min(max, typeof value === 'number' && !isNaN(value) ? value : 50));
+  const pct = Math.max(0, Math.min(100, ((clampedVal - min) / (max - min)) * 100));
+
+  return (
+    <div className="ptz-tactile-slider-wrapper">
+      <div className="ptz-tactile-slider-header">
+        <span className="ptz-tactile-slider-label">
+          {icon} {label}
+        </span>
+        <span className="ptz-tactile-slider-value">
+          {displayValue !== undefined ? displayValue : `${clampedVal}${unit}`}
+        </span>
+      </div>
+
+      <div className={`ptz-tactile-capsule-track ${disabled ? 'disabled' : ''} ${isDragging ? 'active' : ''}`}>
+        {/* Subtle center groove */}
+        <div className="ptz-capsule-groove" />
+
+        {/* Center detent mark */}
+        <div className="ptz-capsule-detent" style={{ left: '50%' }} />
+
+        {/* Thumb Assembly containing [ ▶ [ ▼ ] ◀ ] */}
+        <div
+          className="ptz-capsule-thumb-assembly"
+          style={{
+            left: `calc(32px + (100% - 64px) * ${pct / 100})`,
+          }}
+        >
+          {/* Left inward guide arrow ▶ */}
+          <div
+            className="ptz-capsule-arrow"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (disabled) return;
+              if (onNudge) onNudge(-5);
+              else if (onChange) onChange(Math.max(min, clampedVal - 5));
+            }}
+            title="Step Down (-5%)"
+          >
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
+              <polygon points="1,1 7,5 1,9" />
+            </svg>
+          </div>
+
+          {/* Cyan Thumb with Down Triangle ▼ */}
+          <div
+            className={`ptz-capsule-thumb ${isDragging ? 'dragging' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onReset) onReset();
+            }}
+            title={onReset ? 'Click to reset to default' : undefined}
+          >
+            <svg width="10" height="9" viewBox="0 0 10 9" fill="#ffffff">
+              <polygon points="1,1.5 9,1.5 5,8" />
+            </svg>
+          </div>
+
+          {/* Right inward guide arrow ◀ */}
+          <div
+            className="ptz-capsule-arrow"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (disabled) return;
+              if (onNudge) onNudge(5);
+              else if (onChange) onChange(Math.min(max, clampedVal + 5));
+            }}
+            title="Step Up (+5%)"
+          >
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
+              <polygon points="7,1 1,5 7,9" />
+            </svg>
+          </div>
+        </div>
+
+        {/* Overlay native range input for seamless drag/touch/accessibility */}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={clampedVal}
+          disabled={disabled}
+          className="ptz-capsule-range-native"
+          onChange={(e) => {
+            if (onChange) onChange(parseInt(e.target.value, 10));
+          }}
+          onMouseDown={() => setIsDragging(true)}
+          onMouseUp={(e) => {
+            setIsDragging(false);
+            e.target.blur();
+          }}
+          onTouchStart={() => setIsDragging(true)}
+          onTouchEnd={(e) => {
+            setIsDragging(false);
+            e.target.blur();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function PTZControl() {
   const [cameras, setCameras] = useState([]);
   const [activeCam, setActiveCam] = useState(null);
@@ -1540,21 +1662,19 @@ export default function PTZControl() {
                 🔍 OPTICS & ZOOM RACK
               </div>
 
-              {/* Zoom Controls */}
-              <div className="ptz-slider-group">
-                <label>🔍 Zoom</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={localPTZ.zoom}
-                  onChange={e => sendZoom(parseInt(e.target.value))}
-                  onMouseUp={e => e.target.blur()}
-                  onTouchEnd={e => e.target.blur()}
-                />
-                <span>{localPTZ.zoom}%</span>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              {/* Zoom Controls with Tactile Capsule Slider */}
+              <TactileCapsuleSlider
+                label="Zoom Level"
+                icon="🔍"
+                value={localPTZ.zoom}
+                min={0}
+                max={100}
+                unit="%"
+                onChange={val => sendZoom(val)}
+                onNudge={delta => sendZoom((localPTZRef.current?.zoom || 50) + delta)}
+                onReset={() => sendZoom(50)}
+              />
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <button
                   className="btn btn-xs btn-outline"
                   style={{
@@ -1583,22 +1703,23 @@ export default function PTZControl() {
                 </button>
               </div>
 
-              {/* Focus Controls */}
-              <div className="ptz-slider-group" style={{ marginTop: 2 }}>
-                <label>🎯 Focus</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
+              {/* Focus Controls with Tactile Capsule Slider */}
+              <div style={{ marginTop: 6 }}>
+                <TactileCapsuleSlider
+                  label="Optics Focus"
+                  icon="🎯"
                   value={localPTZ.focus}
+                  min={0}
+                  max={100}
+                  unit="%"
                   disabled={autoFocus}
-                  onChange={e => sendFocus(parseInt(e.target.value))}
-                  onMouseUp={e => e.target.blur()}
-                  onTouchEnd={e => e.target.blur()}
+                  displayValue={autoFocus ? 'AUTO AF' : `${localPTZ.focus}%`}
+                  onChange={val => sendFocus(val)}
+                  onNudge={delta => sendFocus((localPTZRef.current?.focus || 50) + delta)}
+                  onReset={() => sendFocus(50)}
                 />
-                <span>{autoFocus ? 'AUTO' : `${localPTZ.focus}%`}</span>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <button
                   className={`btn btn-xs ${autoFocus ? 'btn-primary' : 'btn-outline'}`}
                   onClick={() => {
