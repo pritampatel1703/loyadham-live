@@ -256,7 +256,18 @@ router.post('/cameras/:id/home', async (req, res) => {
 
 // ── PRESETS ──
 router.get('/cameras/:id/presets', (req, res) => {
-  const presets = ptzPresets.get(req.params.id) || [];
+  let presets = ptzPresets.get(req.params.id);
+  if (!presets || presets.length === 0) {
+    presets = [
+      { id: 'p1', name: 'Wide Shot', pan: 0, tilt: 0, zoom: 20 },
+      { id: 'p2', name: 'Close-up Center', pan: 0, tilt: 5, zoom: 75 },
+      { id: 'p3', name: 'Left Angle', pan: -35, tilt: -2, zoom: 35 },
+      { id: 'p4', name: 'Right Angle', pan: 35, tilt: -2, zoom: 35 },
+      { id: 'p5', name: 'Podium / Stage', pan: 0, tilt: 10, zoom: 60 },
+      { id: 'p6', name: 'Audience Wide', pan: 0, tilt: -15, zoom: 15 },
+    ];
+    ptzPresets.set(req.params.id, presets);
+  }
   res.json({ success: true, presets });
 });
 

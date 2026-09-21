@@ -36,6 +36,8 @@ export default function PTZControl() {
   const [tally, setTally] = useState('off'); // 'pgm' | 'pvw' | 'off'
   const [telemetry, setTelemetry] = useState({ resolution: '', fps: 0, bitrate: 0, battery: -1, signal: -1 });
   const [connectingMsg, setConnectingMsg] = useState('Initializing video feed...');
+  const [shortcutFeedback, setShortcutFeedback] = useState(null);
+  const [activeKeyHighlight, setActiveKeyHighlight] = useState(null);
 
   // Refs
   const joystickAreaRef = useRef(null);
@@ -48,9 +50,30 @@ export default function PTZControl() {
   const retryTimerRef = useRef(null);
   const activeCamRef = useRef(null);
   const videoSourceRef = useRef(videoSource);
+  const localPTZRef = useRef(localPTZ);
+  const speedRef = useRef(speed);
+  const presetsRef = useRef(presets);
+  const feedbackTimerRef = useRef(null);
+  const highlightTimerRef = useRef(null);
 
   activeCamRef.current = activeCam;
   videoSourceRef.current = videoSource;
+  localPTZRef.current = localPTZ;
+  speedRef.current = speed;
+  presetsRef.current = presets;
+
+  const setShortcutBadge = (text, keyType) => {
+    setShortcutFeedback(text);
+    if (keyType) {
+      setActiveKeyHighlight(keyType);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setActiveKeyHighlight(null), 250);
+    }
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => {
+      setShortcutFeedback(null);
+    }, 1200);
+  };
 
   const cam = cameras.find(c => c.id === activeCam) || cameras[0];
 
@@ -332,70 +355,83 @@ export default function PTZControl() {
 
   // ── PTZ Actions: Pan/Tilt ──
   const sendMove = useCallback(async (dpan, dtilt) => {
-    if (!activeCam) return;
-    const newPan = Math.max(-180, Math.min(180, localPTZ.pan + dpan * speed));
-    const newTilt = Math.max(-90, Math.min(90, localPTZ.tilt + dtilt * speed));
+    const camId = activeCamRef.current;
+    if (!camId) return;
+    const spd = speedRef.current;
+    const current = localPTZRef.current || { pan: 0, tilt: 0, zoom: 50, focus: 50 };
+    const newPan = Math.max(-180, Math.min(180, Math.round((current.pan + dpan * spd) * 10) / 10));
+    const newTilt = Math.max(-90, Math.min(90, Math.round((current.tilt + dtilt * spd) * 10) / 10));
+    localPTZRef.current = { ...current, pan: newPan, tilt: newTilt };
     setLocalPTZ(prev => ({ ...prev, pan: newPan, tilt: newTilt }));
     setIsMoving(true);
     setLastAction(`Pan: ${newPan.toFixed(1)}° · Tilt: ${newTilt.toFixed(1)}°`);
 
     try {
-      await ptzApi.move(activeCam, newPan, newTilt, speed);
+      await ptzApi.move(camId, newPan, newTilt, spd);
     } catch (err) {
       console.error('[PTZ] Move error:', err);
     }
 
     setTimeout(() => setIsMoving(false), 250);
-  }, [activeCam, localPTZ, speed]);
+  }, []);
 
   // ── PTZ Actions: Zoom ──
   const sendZoom = useCallback(async (newZoom) => {
-    if (!activeCam) return;
-    const z = Math.max(0, Math.min(100, newZoom));
+    const camId = activeCamRef.current;
+    if (!camId) return;
+    const z = Math.max(0, Math.min(100, Math.round(newZoom)));
+    localPTZRef.current = { ...localPTZRef.current, zoom: z };
     setLocalPTZ(prev => ({ ...prev, zoom: z }));
     setLastAction(`Zoom: ${z}%`);
     try {
-      await ptzApi.zoom(activeCam, z);
+      await ptzApi.zoom(camId, z);
     } catch (err) {
       console.error('[PTZ] Zoom error:', err);
     }
-  }, [activeCam]);
+  }, []);
 
   // ── PTZ Actions: Focus ──
   const sendFocus = useCallback(async (newFocus) => {
-    if (!activeCam) return;
-    const f = Math.max(0, Math.min(100, newFocus));
+    const camId = activeCamRef.current;
+    if (!camId) return;
+    const f = Math.max(0, Math.min(100, Math.round(newFocus)));
+    localPTZRef.current = { ...localPTZRef.current, focus: f };
     setLocalPTZ(prev => ({ ...prev, focus: f }));
     setLastAction(`Focus: ${f}%`);
     try {
-      await ptzApi.focus(activeCam, f, autoFocus);
+      await ptzApi.focus(camId, f, autoFocus);
     } catch (err) {
       console.error('[PTZ] Focus error:', err);
     }
-  }, [activeCam, autoFocus]);
+  }, [autoFocus]);
 
   // ── PTZ Actions: Home ──
   const goHome = useCallback(async () => {
-    if (!activeCam) return;
+    const camId = activeCamRef.current;
+    if (!camId) return;
+    localPTZRef.current = { ...localPTZRef.current, pan: 0, tilt: 0, zoom: 50 };
     setLocalPTZ(prev => ({ ...prev, pan: 0, tilt: 0, zoom: 50 }));
     setLastAction('Reset Home Position');
     try {
-      await ptzApi.home(activeCam);
+      await ptzApi.home(camId);
     } catch (err) {
       console.error('[PTZ] Home error:', err);
     }
-  }, [activeCam]);
+  }, []);
 
   // ── Presets ──
   const savePreset = async () => {
-    if (!activeCam) return;
-    const name = prompt('Preset Name:', `Shot ${presets.length + 1}`);
+    const camId = activeCamRef.current;
+    if (!camId) return;
+    const name = prompt('Preset Name:', `Shot ${(presetsRef.current?.length || 0) + 1}`);
     if (!name) return;
     try {
-      const res = await ptzApi.savePreset(activeCam, name, localPTZ.pan, localPTZ.tilt, localPTZ.zoom, localPTZ.focus);
+      const cur = localPTZRef.current;
+      const res = await ptzApi.savePreset(camId, name, cur.pan, cur.tilt, cur.zoom, cur.focus);
       if (res.preset) {
         setPresets(prev => [...prev, res.preset]);
         setLastAction(`Saved preset: "${name}"`);
+        setShortcutBadge(`💾 Saved Preset "${name}"`);
       }
     } catch (err) {
       console.error('[PTZ] Save preset error:', err);
@@ -403,20 +439,29 @@ export default function PTZControl() {
   };
 
   const recallPreset = useCallback(async (preset) => {
-    if (!activeCam || !preset) return;
-    setLocalPTZ({ pan: preset.pan, tilt: preset.tilt, zoom: preset.zoom, focus: preset.focus || 50 });
+    const camId = activeCamRef.current;
+    if (!camId || !preset) return;
+    localPTZRef.current = {
+      ...localPTZRef.current,
+      pan: preset.pan,
+      tilt: preset.tilt,
+      zoom: preset.zoom,
+      focus: preset.focus !== undefined ? preset.focus : 50,
+    };
+    setLocalPTZ({ pan: preset.pan, tilt: preset.tilt, zoom: preset.zoom, focus: preset.focus !== undefined ? preset.focus : 50 });
     setLastAction(`Recalled preset: "${preset.name}"`);
     try {
-      await ptzApi.recallPreset(activeCam, preset.id);
+      await ptzApi.recallPreset(camId, preset.id);
     } catch (err) {
       console.error('[PTZ] Recall error:', err);
     }
-  }, [activeCam]);
+  }, []);
 
   const deletePreset = async (presetId) => {
-    if (!activeCam) return;
+    const camId = activeCamRef.current;
+    if (!camId) return;
     try {
-      await ptzApi.deletePreset(activeCam, presetId);
+      await ptzApi.deletePreset(camId, presetId);
       setPresets(prev => prev.filter(p => p.id !== presetId));
     } catch (err) {
       console.error('[PTZ] Delete preset error:', err);
@@ -555,25 +600,107 @@ export default function PTZControl() {
     }
   };
 
-  // ── Keyboard Shortcuts ──
+  // ── Keyboard Shortcuts (Capture Phase & Ref-driven) ──
   useEffect(() => {
-    const handler = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'ArrowUp') { e.preventDefault(); sendMove(0, 1); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); sendMove(0, -1); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); sendMove(-1, 0); }
-      else if (e.key === 'ArrowRight') { e.preventDefault(); sendMove(1, 0); }
-      else if (e.key === '+' || e.key === '=') { e.preventDefault(); sendZoom(localPTZ.zoom + 5); }
-      else if (e.key === '-' || e.key === '_') { e.preventDefault(); sendZoom(localPTZ.zoom - 5); }
-      else if (e.key === 'h' || e.key === 'H') { e.preventDefault(); goHome(); }
-      else if (e.key >= '1' && e.key <= '9') {
-        const num = parseInt(e.key);
-        if (presets[num - 1]) recallPreset(presets[num - 1]);
+    const handleKeyDown = (e) => {
+      // Don't intercept when user is typing in a text input or textarea
+      const tag = e.target.tagName?.toLowerCase();
+      const isTextInput = tag === 'textarea' || (tag === 'input' && ['text', 'password', 'search', 'email', 'number'].includes(e.target.type));
+      if (isTextInput) return;
+
+      const key = e.key;
+      const code = e.code || '';
+
+      // Pan & Tilt: Arrow keys or WASD
+      if (key === 'ArrowUp' || code === 'ArrowUp' || key === 'w' || key === 'W') {
+        e.preventDefault();
+        e.stopPropagation();
+        sendMove(0, 1);
+        setShortcutBadge('▲ Tilt Up', 'up');
+        return;
+      }
+      if (key === 'ArrowDown' || code === 'ArrowDown' || key === 's' || key === 'S') {
+        e.preventDefault();
+        e.stopPropagation();
+        sendMove(0, -1);
+        setShortcutBadge('▼ Tilt Down', 'down');
+        return;
+      }
+      if (key === 'ArrowLeft' || code === 'ArrowLeft' || key === 'a' || key === 'A') {
+        e.preventDefault();
+        e.stopPropagation();
+        sendMove(-1, 0);
+        setShortcutBadge('◄ Pan Left', 'left');
+        return;
+      }
+      if (key === 'ArrowRight' || code === 'ArrowRight' || key === 'd' || key === 'D') {
+        e.preventDefault();
+        e.stopPropagation();
+        sendMove(1, 0);
+        setShortcutBadge('► Pan Right', 'right');
+        return;
+      }
+
+      // Zoom In: + / = / NumpadAdd / E
+      if (key === '+' || key === '=' || code === 'NumpadAdd' || code === 'Equal' || key === 'e' || key === 'E') {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentZ = localPTZRef.current?.zoom !== undefined ? localPTZRef.current.zoom : 50;
+        const nextZ = Math.min(100, currentZ + 5);
+        sendZoom(nextZ);
+        setShortcutBadge(`🔍 Zoom In: ${nextZ}%`, 'zoom-in');
+        return;
+      }
+
+      // Zoom Out: - / _ / NumpadSubtract / Minus / Q
+      if (key === '-' || key === '_' || code === 'NumpadSubtract' || code === 'Minus' || key === 'q' || key === 'Q') {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentZ = localPTZRef.current?.zoom !== undefined ? localPTZRef.current.zoom : 50;
+        const nextZ = Math.max(0, currentZ - 5);
+        sendZoom(nextZ);
+        setShortcutBadge(`🔎 Zoom Out: ${nextZ}%`, 'zoom-out');
+        return;
+      }
+
+      // Home Position: H or Home
+      if (key === 'h' || key === 'H' || code === 'KeyH' || code === 'Home') {
+        e.preventDefault();
+        e.stopPropagation();
+        goHome();
+        setShortcutBadge('🏠 Reset Home', 'home');
+        return;
+      }
+
+      // Presets: 1 to 9 (top number row or numpad)
+      let presetNum = null;
+      if (key >= '1' && key <= '9') {
+        presetNum = parseInt(key, 10);
+      } else if (code.startsWith('Numpad') && code.length === 7) {
+        const d = parseInt(code.replace('Numpad', ''), 10);
+        if (d >= 1 && d <= 9) presetNum = d;
+      } else if (code.startsWith('Digit')) {
+        const d = parseInt(code.replace('Digit', ''), 10);
+        if (d >= 1 && d <= 9) presetNum = d;
+      }
+
+      if (presetNum !== null) {
+        e.preventDefault();
+        e.stopPropagation();
+        const list = presetsRef.current || [];
+        const targetPreset = list[presetNum - 1];
+        if (targetPreset) {
+          recallPreset(targetPreset);
+          setShortcutBadge(`🎯 Preset ${presetNum}: "${targetPreset.name}"`, `preset-${presetNum}`);
+        } else {
+          setShortcutBadge(`⚠️ Preset ${presetNum} empty`, `preset-${presetNum}`);
+        }
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [sendMove, sendZoom, goHome, presets, recallPreset, localPTZ.zoom]);
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [sendMove, sendZoom, goHome, recallPreset]);
 
   // Digital pan/zoom preview style calculation
   const zoomFactor = digitalPTZ ? 1 + (localPTZ.zoom / 100) * 1.5 : 1;
@@ -630,7 +757,11 @@ export default function PTZControl() {
             className="form-input"
             style={{ width: 190, fontSize: '.78rem' }}
             value={activeCam || ''}
-            onChange={e => { setActiveCam(e.target.value); setVideoSource('camera'); }}
+            onChange={e => {
+              setActiveCam(e.target.value);
+              setVideoSource('camera');
+              e.target.blur();
+            }}
           >
             {cameras.length === 0 && <option value="">No cameras registered</option>}
             {cameras.map(c => (
@@ -858,6 +989,22 @@ export default function PTZControl() {
                 </div>
               )}
 
+              {/* Active Keyboard Shortcut Feedback Toast */}
+              {shortcutFeedback && (
+                <div style={{
+                  position: 'absolute', top: 50, left: '50%', transform: 'translateX(-50%)',
+                  background: 'rgba(15,23,42,.95)', border: '2px solid #818cf8',
+                  borderRadius: 8, padding: '8px 18px', color: '#fff',
+                  fontSize: '.95rem', fontWeight: 800,
+                  boxShadow: '0 8px 30px rgba(0,0,0,.9), 0 0 16px rgba(99,102,241,.6)',
+                  pointerEvents: 'none', zIndex: 60,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span>⌨️</span>
+                  <span>{shortcutFeedback}</span>
+                </div>
+              )}
+
               {/* TOP BAR OVERLAYS: Badges, Tally, Battery, Signal */}
               <div style={{
                 position: 'absolute', top: 10, left: 10, right: 10,
@@ -1055,11 +1202,56 @@ export default function PTZControl() {
             {/* D-Pad & Phone Actions */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
               <div className="ptz-dpad">
-                <button className="ptz-dpad-btn ptz-dpad-up" onMouseDown={() => sendMove(0, 1)} title="Tilt Up">▲</button>
-                <button className="ptz-dpad-btn ptz-dpad-left" onMouseDown={() => sendMove(-1, 0)} title="Pan Left">◄</button>
-                <button className="ptz-dpad-btn ptz-dpad-center" onClick={goHome} title="Home Position" style={{ fontSize: '.68rem', fontWeight: 800 }}>⌂</button>
-                <button className="ptz-dpad-btn ptz-dpad-right" onMouseDown={() => sendMove(1, 0)} title="Pan Right">►</button>
-                <button className="ptz-dpad-btn ptz-dpad-down" onMouseDown={() => sendMove(0, -1)} title="Tilt Down">▼</button>
+                <button
+                  className="ptz-dpad-btn ptz-dpad-up"
+                  style={{
+                    background: activeKeyHighlight === 'up' ? 'var(--accent)' : undefined,
+                    color: activeKeyHighlight === 'up' ? '#fff' : undefined,
+                    transform: activeKeyHighlight === 'up' ? 'scale(0.92)' : undefined,
+                  }}
+                  onMouseDown={() => sendMove(0, 1)}
+                  title="Tilt Up (↑ or W)"
+                >▲</button>
+                <button
+                  className="ptz-dpad-btn ptz-dpad-left"
+                  style={{
+                    background: activeKeyHighlight === 'left' ? 'var(--accent)' : undefined,
+                    color: activeKeyHighlight === 'left' ? '#fff' : undefined,
+                    transform: activeKeyHighlight === 'left' ? 'scale(0.92)' : undefined,
+                  }}
+                  onMouseDown={() => sendMove(-1, 0)}
+                  title="Pan Left (← or A)"
+                >◄</button>
+                <button
+                  className="ptz-dpad-btn ptz-dpad-center"
+                  style={{
+                    background: activeKeyHighlight === 'home' ? '#22c55e' : undefined,
+                    color: activeKeyHighlight === 'home' ? '#fff' : undefined,
+                    transform: activeKeyHighlight === 'home' ? 'scale(0.92)' : undefined,
+                  }}
+                  onClick={goHome}
+                  title="Home Position (H)"
+                >⌂</button>
+                <button
+                  className="ptz-dpad-btn ptz-dpad-right"
+                  style={{
+                    background: activeKeyHighlight === 'right' ? 'var(--accent)' : undefined,
+                    color: activeKeyHighlight === 'right' ? '#fff' : undefined,
+                    transform: activeKeyHighlight === 'right' ? 'scale(0.92)' : undefined,
+                  }}
+                  onMouseDown={() => sendMove(1, 0)}
+                  title="Pan Right (→ or D)"
+                >►</button>
+                <button
+                  className="ptz-dpad-btn ptz-dpad-down"
+                  style={{
+                    background: activeKeyHighlight === 'down' ? 'var(--accent)' : undefined,
+                    color: activeKeyHighlight === 'down' ? '#fff' : undefined,
+                    transform: activeKeyHighlight === 'down' ? 'scale(0.92)' : undefined,
+                  }}
+                  onMouseDown={() => sendMove(0, -1)}
+                  title="Tilt Down (↓ or S)"
+                >▼</button>
               </div>
 
               {/* Phone Tools (Flip, Torch, Mute) */}
@@ -1089,12 +1281,32 @@ export default function PTZControl() {
                   max="100"
                   value={localPTZ.zoom}
                   onChange={e => sendZoom(parseInt(e.target.value))}
+                  onMouseUp={e => e.target.blur()}
+                  onTouchEnd={e => e.target.blur()}
                 />
                 <span>{localPTZ.zoom}%</span>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-xs btn-outline" style={{ flex: 1 }} onClick={() => sendZoom(localPTZ.zoom - 10)}>Z−</button>
-                <button className="btn btn-xs btn-outline" style={{ flex: 1 }} onClick={() => sendZoom(localPTZ.zoom + 10)}>Z+</button>
+                <button
+                  className="btn btn-xs btn-outline"
+                  style={{
+                    flex: 1,
+                    background: activeKeyHighlight === 'zoom-out' ? 'var(--accent)' : undefined,
+                    color: activeKeyHighlight === 'zoom-out' ? '#fff' : undefined,
+                  }}
+                  onClick={() => sendZoom((localPTZRef.current?.zoom || 50) - 10)}
+                  title="Zoom Out (− or Q)"
+                >Z−</button>
+                <button
+                  className="btn btn-xs btn-outline"
+                  style={{
+                    flex: 1,
+                    background: activeKeyHighlight === 'zoom-in' ? 'var(--accent)' : undefined,
+                    color: activeKeyHighlight === 'zoom-in' ? '#fff' : undefined,
+                  }}
+                  onClick={() => sendZoom((localPTZRef.current?.zoom || 50) + 10)}
+                  title="Zoom In (+ or E)"
+                >Z+</button>
               </div>
 
               {/* Focus Slider */}
@@ -1199,14 +1411,29 @@ export default function PTZControl() {
 
           {/* Keyboard Shortcuts Guide */}
           <div className="ptz-shortcuts">
-            <div style={{ fontSize: '.65rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>
+            <div style={{ fontSize: '.7rem', fontWeight: 800, color: '#f8fafc', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
               ⌨️ Keyboard Shortcuts
+              <span style={{ fontSize: '.6rem', fontWeight: 600, color: '#4ade80', background: 'rgba(34,197,94,.15)', padding: '1px 6px', borderRadius: 4 }}>
+                Active
+              </span>
             </div>
-            <div style={{ fontSize: '.58rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              <div>↑ ↓ ← → : Pan / Tilt</div>
-              <div>+ / − : Zoom In / Out</div>
-              <div>H : Reset Home Position</div>
-              <div>1-9 : Quick Recall Preset</div>
+            <div style={{ fontSize: '.64rem', color: 'var(--text-muted)', lineHeight: 1.8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Pan / Tilt</span>
+                <span style={{ color: '#fff', fontFamily: 'var(--mono)', fontWeight: 700 }}>↑ ↓ ← → / WASD</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Zoom In / Out</span>
+                <span style={{ color: '#fff', fontFamily: 'var(--mono)', fontWeight: 700 }}>+ / − (or E / Q)</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Reset Home</span>
+                <span style={{ color: '#fff', fontFamily: 'var(--mono)', fontWeight: 700 }}>H / Home</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Recall Preset</span>
+                <span style={{ color: '#fff', fontFamily: 'var(--mono)', fontWeight: 700 }}>1 to 9</span>
+              </div>
             </div>
           </div>
         </div>
