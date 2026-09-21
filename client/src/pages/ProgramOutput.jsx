@@ -70,6 +70,8 @@ export default function ProgramOutput() {
 
   // Track whether any video element has actual playing frames
   const [hasLiveFrames, setHasLiveFrames] = useState(false);
+  // Track whether pgm-master relay specifically has live frames
+  const [pgmMasterHasFrames, setPgmMasterHasFrames] = useState(false);
 
   // ── Safe attach stream to video element ──
   const safeAttachStream = useCallback((el, stream, streamId) => {
@@ -364,17 +366,24 @@ export default function ProgramOutput() {
     pgmIdRef.current = cleanId;
     try { localStorage.setItem('pixel_current_pgm', cleanId); } catch (_) {}
 
-    // Check if the new video element already has frames
-    const isRtmp = cleanId.startsWith('rtmp-');
-    const newVideo = isRtmp ? rtmpVideoRefs.current[cleanId.replace('rtmp-', '')] : videoRefs.current[cleanId];
-    if (newVideo && !newVideo.paused && newVideo.readyState >= 3) {
+    // Check if the pgm-master relay already has frames (primary path)
+    const pgmMasterVideo = videoRefs.current['pgm-master'];
+    if (pgmMasterVideo && !pgmMasterVideo.paused && pgmMasterVideo.readyState >= 3 && pgmMasterVideo.videoWidth > 0) {
       setHasLiveFrames(true);
+      setPgmMasterHasFrames(true);
     } else {
-      setHasLiveFrames(false);
+      // Check if the specific device video element has frames (fallback)
+      const isRtmp = cleanId.startsWith('rtmp-');
+      const newVideo = isRtmp ? rtmpVideoRefs.current[cleanId.replace('rtmp-', '')] : videoRefs.current[cleanId];
+      if (newVideo && !newVideo.paused && newVideo.readyState >= 3) {
+        setHasLiveFrames(true);
+      } else {
+        setHasLiveFrames(false);
+      }
     }
 
-    // Connect to camera WebRTC if not RTMP
-    if (!isRtmp && cleanId !== 'pgm-master') {
+    // Connect to camera WebRTC if not RTMP (fallback direct connection)
+    if (!cleanId.startsWith('rtmp-') && cleanId !== 'pgm-master') {
       connectToCamera(cleanId);
     }
   }, [connectToCamera]);
@@ -665,18 +674,25 @@ export default function ProgramOutput() {
         outline: 'none',
       }}
     >
-      {/* ── 1. WEBRTC PGM-MASTER VIDEO ── */}
+      {/* ── 1. WEBRTC PGM-MASTER VIDEO (Primary feed from Production page relay) ── */}
       <video
         ref={el => { if (el) videoRefs.current['pgm-master'] = el; }}
         autoPlay
         playsInline
         onPlaying={(e) => {
-          if (e.target.videoWidth > 0 && pgmId === 'pgm-master') {
+          if (e.target.videoWidth > 0) {
+            setPgmMasterHasFrames(true);
             setHasLiveFrames(true);
             setActiveFeeds(prev => ({ ...prev, 'pgm-master': true }));
           }
         }}
-        onWaiting={() => { if (pgmId === 'pgm-master') setHasLiveFrames(false); }}
+        onWaiting={() => { setPgmMasterHasFrames(false); }}
+        onLoadedData={(e) => {
+          if (e.target.videoWidth > 0) {
+            setPgmMasterHasFrames(true);
+            setHasLiveFrames(true);
+          }
+        }}
         style={{
           position: 'absolute',
           inset: 0,
@@ -685,15 +701,16 @@ export default function ProgramOutput() {
           objectFit: 'contain',
           background: 'transparent',
           zIndex: 20,
-          opacity: (pgmId === 'pgm-master' && hasLiveFrames) ? 1 : 0,
+          opacity: (pgmMasterHasFrames && !isRtmpPgm) ? 1 : 0,
           pointerEvents: 'none',
           transition: 'opacity 0.15s ease',
         }}
       />
 
-      {/* ── 2. WEBRTC DEVICE STREAMS ── */}
+      {/* ── 2. WEBRTC DEVICE STREAMS (Fallback — only visible when pgm-master has no frames) ── */}
       {devices.map(d => {
         const isCurrent = String(d.id) === String(pgmId);
+        const showDirectFeed = isCurrent && !pgmMasterHasFrames && hasLiveFrames;
         return (
           <video
             key={`cam-${d.id}`}
@@ -701,9 +718,11 @@ export default function ProgramOutput() {
             autoPlay
             playsInline
             onPlaying={(e) => {
-              if (e.target.videoWidth > 0 && isCurrent) setHasLiveFrames(true);
+              if (e.target.videoWidth > 0 && isCurrent && !pgmMasterHasFrames) {
+                setHasLiveFrames(true);
+              }
             }}
-            onWaiting={() => { if (isCurrent) setHasLiveFrames(false); }}
+            onWaiting={() => { if (isCurrent && !pgmMasterHasFrames) setHasLiveFrames(false); }}
             style={{
               position: 'absolute',
               inset: 0,
@@ -711,7 +730,7 @@ export default function ProgramOutput() {
               height: '100%',
               objectFit: 'contain',
               background: 'transparent',
-              opacity: (isCurrent && hasLiveFrames) ? 1 : 0,
+              opacity: showDirectFeed ? 1 : 0,
               zIndex: 19,
               pointerEvents: 'none',
               transition: 'opacity 0.15s ease',

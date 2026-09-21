@@ -1,21 +1,39 @@
 {
   "devices": [
     {
-      "id": "a866399d-8c4f-4091-bb49-3c0c1585f4a2",
-      "name": "Pritam Patel",
+      "id": "2c0f182d-ed95-4d53-9e6a-dbb754a0a4be",
+      "name": "pritam",
       "label": "",
       "group_name": "Default",
-      "pairing_token": "A6BB83E2E490",
-      "is_online": 0,
+      "pairing_token": "CA989448EAAC",
+      "is_online": 1,
       "battery_percent": -1,
       "signal_quality": -1,
       "temperature": -1,
-      "stream_resolution": "1080x1920",
+      "stream_resolution": "1920x1080",
       "stream_fps": 30,
       "stream_bitrate": 0,
       "network_type": "",
       "ip_address": "",
-      "tally_state": "preview",
+      "tally_state": "program",
+      "tags": []
+    },
+    {
+      "id": "4421a66d-a7ef-433d-a663-7c33ea51d48a",
+      "name": "smita",
+      "label": "",
+      "group_name": "Default",
+      "pairing_token": "1087FB05E618",
+      "is_online": 1,
+      "battery_percent": 75,
+      "signal_quality": 17,
+      "temperature": -1,
+      "stream_resolution": "1920x1080",
+      "stream_fps": 30,
+      "stream_bitrate": 0,
+      "network_type": "4G",
+      "ip_address": "",
+      "tally_state": "off",
       "tags": []
     }
   ]
