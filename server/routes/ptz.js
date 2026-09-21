@@ -69,7 +69,7 @@ router.get('/cameras', async (req, res) => {
       phoneCameras = (devices || []).map(d => ({
         id: `phone-${d.id}`,
         name: d.name || `Camera ${d.id}`,
-        model: 'Phone Camera',
+        model: 'Phone / Studio Camera',
         ip: d.ip_address || '',
         port: 0,
         protocol: 'WebRTC',
@@ -79,12 +79,15 @@ router.get('/cameras', async (req, res) => {
         pan: 0, tilt: 0, zoom: 50, focus: 50, iris: 50,
         battery: d.battery_percent,
         signal: d.signal_quality,
+        fps: d.stream_fps,
+        bitrate: d.stream_bitrate,
+        resolution: d.stream_resolution,
       }));
     } catch (_) {}
 
-    // Merge IP PTZ cameras + phone cameras
+    // Real registered devices first, then IP PTZ cameras
     const ipCameras = Array.from(ptzCameras.values());
-    const allCameras = [...ipCameras, ...phoneCameras];
+    const allCameras = [...phoneCameras, ...ipCameras];
     
     res.json({ success: true, cameras: allCameras });
   } catch (err) {
@@ -94,11 +97,21 @@ router.get('/cameras', async (req, res) => {
 
 // ── ADD PTZ CAMERA ──
 router.post('/cameras', (req, res) => {
-  const { name, model, ip, port, protocol } = req.body;
+  const { name, model, ip, port, protocol, streamUrl } = req.body;
   if (!name || !ip) return res.status(400).json({ success: false, error: 'Name and IP required' });
   
   const id = `ptz-${Date.now()}`;
-  const cam = { id, name, model: model || 'Unknown', ip, port: port || 80, protocol: protocol || 'VISCA', online: false, pan: 0, tilt: 0, zoom: 50, focus: 50, iris: 50 };
+  const cam = {
+    id,
+    name,
+    model: model || 'Unknown',
+    ip,
+    port: port || 80,
+    protocol: protocol || 'VISCA',
+    streamUrl: streamUrl || '',
+    online: false,
+    pan: 0, tilt: 0, zoom: 50, focus: 50, iris: 50,
+  };
   ptzCameras.set(id, cam);
   ptzPresets.set(id, []);
   res.json({ success: true, camera: cam });

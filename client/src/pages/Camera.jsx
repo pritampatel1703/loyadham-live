@@ -680,8 +680,9 @@ export default function Camera() {
     const devSock = deviceSocketRef.current;
     if (!devSock) return;
 
-    const cmdHandler = ({ cmd }) => {
-      console.log('[Camera] Remote command:', cmd);
+    const cmdHandler = ({ cmd, payload, deviceId: targetDeviceId }) => {
+      if (targetDeviceId && targetDeviceId !== deviceIdRef.current) return;
+      console.log('[Camera] Remote command:', cmd, payload);
       if (cmd === 'flip') {
         setFacingMode(f => f === 'environment' ? 'user' : 'environment');
         setSelectedCameraId('');
@@ -689,12 +690,21 @@ export default function Camera() {
         toggleTorch();
       } else if (cmd === 'mute') {
         toggleMute();
+      } else if (cmd === 'ptz-zoom' && payload && payload.zoom !== undefined) {
+        const min = zoomRange.min || 1;
+        const max = zoomRange.max > 1 ? zoomRange.max : 3;
+        const targetZoom = min + (payload.zoom / 100) * (max - min);
+        setZoom(targetZoom);
+        const targetTrack = rawTrackRef.current || trackRef.current;
+        if (targetTrack) {
+          targetTrack.applyConstraints({ advanced: [{ zoom: targetZoom }] }).catch(() => {});
+        }
       }
     };
 
     devSock.on('camera-cmd', cmdHandler);
     return () => devSock.off('camera-cmd', cmdHandler);
-  }, [deviceId]);
+  }, [deviceId, zoomRange]);
 
 
   // ── Battery & Network info & Mobile setup ──
